@@ -1,7 +1,9 @@
 [build]
   functions = "netlify/functions"
 
+# Catch-all relay for SEOBoss API
 [[redirects]]
   from = "/seoboss/api/*"
   to = "/.netlify/functions/relay/seoboss/api/:splat"
   status = 200
+  force = true
