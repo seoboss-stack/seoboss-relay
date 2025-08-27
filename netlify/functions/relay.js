@@ -1,9 +1,9 @@
-// netlify/functions/relay.js (CommonJS secure relay)
+// netlify/functions/relay.js — secure API relay
 const crypto = require("crypto");
 
 const ALLOW_ORIGINS = new Set([
   "https://seoboss.com",
-  // "http://localhost:3000", // enable for local dev if needed
+  // "http://localhost:3000", // enable if testing locally
 ]);
 
 const ROUTE_MAP = {
@@ -24,11 +24,13 @@ const ROUTE_MAP = {
   "/seoboss/api/shop/blogs":           "N8N_SHOP_LIST_BLOGS_URL",
   "/seoboss/api/shop/import-articles": "N8N_SHOP_IMPORT_URL",
 
-  // Provider (Shopify webhooks, etc.)
+  // Provider (Shopify webhooks etc.)
   "/seoboss/api/shopify":              "N8N_SHOPIFY_URL",
 };
 
-function isProviderRoute(p) { return p === "/seoboss/api/shopify"; }
+function isProviderRoute(path) {
+  return path === "/seoboss/api/shopify";
+}
 
 function timingSafeEq(a, b) {
   const A = Buffer.from(a, "hex");
@@ -45,7 +47,8 @@ exports.handler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": anyOrigin,
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+        "Access-Control-Allow-Headers":
+          "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
       },
     };
   }
@@ -54,35 +57,51 @@ exports.handler = async (event) => {
     return { statusCode: 405, body: "Method not allowed" };
   }
 
-  // Strip Netlify prefix if present
+  // Normalize path (strip Netlify prefix if present)
   let path = event.path || "";
   path = path.replace("/.netlify/functions/relay", "");
 
   const envKey = ROUTE_MAP[path];
   const upstream = envKey ? process.env[envKey] : null;
   if (!upstream) {
-    return { statusCode: 404, body: JSON.stringify({ ok:false, error:"Unknown route", path }) };
+    return {
+      statusCode: 404,
+      body: JSON.stringify({ ok: false, error: "Unknown route", path }),
+    };
   }
 
   const isProvider = isProviderRoute(path);
   const origin = event.headers.origin || "";
 
-  // Enforce origin (skip for provider webhooks like Shopify)
+  // Enforce origin for browser calls
   if (!isProvider && !ALLOW_ORIGINS.has(origin)) {
-    return { statusCode: 403, body: JSON.stringify({ ok:false, error:"Forbidden origin" }) };
+    return {
+      statusCode: 403,
+      body: JSON.stringify({ ok: false, error: "Forbidden origin" }),
+    };
   }
 
-  // Verify HMAC: body + "\n" + ts (PUBLIC_HMAC_KEY)
+  // Verify HMAC (skip Shopify/provider routes)
   if (!isProvider) {
-    const tsHeader = event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"];
-    const hmacHeader = (event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "").toLowerCase();
+    const tsHeader =
+      event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"];
+    const hmacHeader =
+      (event.headers["x-seoboss-hmac"] ||
+        event.headers["X-Seoboss-Hmac"] ||
+        "").toLowerCase();
 
     const ts = parseInt(tsHeader || "0", 10);
-    if (!ts || Math.abs(Date.now()/1000 - ts) > 300) {
-      return { statusCode: 401, body: JSON.stringify({ ok:false, error:"Stale or missing timestamp" }) };
+    if (!ts || Math.abs(Date.now() / 1000 - ts) > 300) {
+      return {
+        statusCode: 401,
+        body: JSON.stringify({ ok: false, error: "Stale or missing timestamp" }),
+      };
     }
     if (!hmacHeader || !process.env.PUBLIC_HMAC_KEY) {
-      return { statusCode: 401, body: JSON.stringify({ ok:false, error:"Missing HMAC or key" }) };
+      return {
+        statusCode: 401,
+        body: JSON.stringify({ ok: false, error: "Missing HMAC or key" }),
+      };
     }
 
     const raw = event.body || "";
@@ -92,7 +111,10 @@ exports.handler = async (event) => {
       .digest("hex");
 
     if (!timingSafeEq(expected, hmacHeader)) {
-      return { statusCode: 401, body: JSON.stringify({ ok:false, error:"Bad signature" }) };
+      return {
+        statusCode: 401,
+        body: JSON.stringify({ ok: false, error: "Bad signature" }),
+      };
     }
   }
 
@@ -100,11 +122,17 @@ exports.handler = async (event) => {
   const resp = await fetch(upstream, {
     method: "POST",
     headers: {
-      "Content-Type": event.headers["content-type"] || "application/x-www-form-urlencoded",
+      "Content-Type":
+        event.headers["content-type"] || "application/x-www-form-urlencoded",
       "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET,
-      "X-Seoboss-Ts": event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
-      "X-Seoboss-Hmac": event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "",
-      "X-Seoboss-Key-Id": event.headers["x-seoboss-key-id"] || event.headers["X-Seoboss-Key-Id"] || "",
+      "X-Seoboss-Ts":
+        event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
+      "X-Seoboss-Hmac":
+        event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "",
+      "X-Seoboss-Key-Id":
+        event.headers["x-seoboss-key-id"] ||
+        event.headers["X-Seoboss-Key-Id"] ||
+        "",
     },
     body: event.body,
   });
