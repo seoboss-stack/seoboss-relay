@@ -1,8 +1,65 @@
-{\rtf1\ansi\ansicpg1252\cocoartf2822
-\cocoatextscaling0\cocoaplatform0{\fonttbl\f0\fswiss\fcharset0 Helvetica;}
-{\colortbl;\red255\green255\blue255;}
-{\*\expandedcolortbl;;}
-\paperw11900\paperh16840\margl1440\margr1440\vieww11520\viewh8400\viewkind0
-\pard\tx720\tx1440\tx2160\tx2880\tx3600\tx4320\tx5040\tx5760\tx6480\tx7200\tx7920\tx8640\pardirnatural\partightenfactor0
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>SEOBoss Relay</title>
+  <meta name="robots" content="noindex,follow" />
+  <style>
+    :root { --ink:#0f172a; --muted:#475569; --bg:#f8fafc; --card:#ffffff; --accent:#06b6d4; }
+    *{box-sizing:border-box} html,body{height:100%}
+    body{margin:0;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--ink)}
+    .wrap{max-width:760px;margin:8vh auto;padding:24px}
+    .card{background:var(--card);border:1px solid #e2e8f0;border-radius:14px;box-shadow:0 4px 18px rgba(2,8,23,.04);padding:22px}
+    h1{margin:0 0 8px;font-size:28px}
+    p{margin:6px 0;color:var(--muted)}
+    code,kbd{background:#0ea5e91a;color:#0f172a;padding:.15rem .35rem;border-radius:.35rem;border:1px solid #0ea5e933}
+    .ok{display:inline-block;background:#10b9811a;color:#065f46;border:1px solid #10b98133;padding:.25rem .55rem;border-radius:.5rem;font-weight:700}
+    .grid{display:grid;grid-template-columns:1fr;gap:10px;margin-top:14px}
+    .hint{font-size:14px}
+    a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <div class="card">
+      <div class="ok">Relay online</div>
+      <h1>SEOBoss Relay</h1>
+      <p>This site hosts your Netlify Function used to securely forward requests to your backend.</p>
 
-\f0\fs24 \cf0 ok}
+      <div class="grid">
+        <div>
+          <strong>Health</strong>
+          <p class="hint">If you can see this page, the deploy is good. Function routes are mounted under
+            <code>/.netlify/functions/relay</code> and exposed via clean paths by redirects.</p>
+        </div>
+
+        <div>
+          <strong>POST endpoints (examples)</strong>
+          <p class="hint">These accept <code>application/x-www-form-urlencoded</code> with HMAC headers. They will return
+            <code>405</code> for GET in a browser tab.</p>
+          <ul>
+            <li><code>/seoboss/api/onboarding/submit</code></li>
+            <li><code>/seoboss/api/onboarding/activate</code></li>
+            <li><code>/seoboss/api/onboarding/resend</code></li>
+            <li><code>/seoboss/api/client/profile</code></li>
+            <li><code>/seoboss/api/shop/blogs</code></li>
+            <li><code>/seoboss/api/shop/import-articles</code></li>
+          </ul>
+        </div>
+
+        <div>
+          <strong>Notes</strong>
+          <ul class="hint">
+            <li>CORS is restricted to your storefront origin.</li>
+            <li>Requests must include <code>X-Seoboss-Ts</code> and <code>X-Seoboss-Hmac</code>.</li>
+            <li>Server secrets are stored as Netlify environment variables.</li>
+          </ul>
+        </div>
+      </div>
+
+      <p class="hint">© SEOBoss</p>
+    </div>
+  </main>
+</body>
+</html>
