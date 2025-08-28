@@ -49,6 +49,8 @@ function corsReply(statusCode, bodyObj, origin) {
     body: JSON.stringify(bodyObj),
   };
 }
+console.log('DEBUG PUBLIC_HMAC_KEY:', process.env.PUBLIC_HMAC_KEY);
+console.log('DEBUG FORWARD_SECRET:', process.env.FORWARD_SECRET);
 
 exports.handler = async (event) => {
   // CORS preflight
