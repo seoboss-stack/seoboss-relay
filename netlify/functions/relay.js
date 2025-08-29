@@ -1,5 +1,4 @@
-relay:
-// netlify/functions/relay.js — secure API relay
+// netlify/functions/relay.js — secure API relay (hardened)
 const crypto = require("crypto");
 
 const ALLOW_ORIGINS = new Set([
@@ -29,6 +28,9 @@ const ROUTE_MAP = {
   "/seoboss/api/shopify":              "N8N_SHOPIFY_URL",
 };
 
+const DEBUG = process.env.DEBUG_RELAY === "1";
+const MAX_BODY = 1_000_000; // ~1MB guard
+
 function isProviderRoute(path) {
   return path === "/seoboss/api/shopify";
 }
@@ -39,24 +41,38 @@ function timingSafeEq(a, b) {
   return A.length === B.length && crypto.timingSafeEqual(A, B);
 }
 
+function baseCors(origin) {
+  return origin
+    ? {
+        "Access-Control-Allow-Origin": origin,
+        "Vary": "Origin",
+      }
+    : {};
+}
+
+// Full CORS for non-provider routes
 function corsHeaders(origin, isProvider) {
   if (isProvider) return {};
-  if (!origin) return {};
   return {
-    "Access-Control-Allow-Origin": origin,
+    ...baseCors(origin),
     "Access-Control-Allow-Headers":
       "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
     "Access-Control-Allow-Methods": "POST, OPTIONS",
-    "Vary": "Origin",
   };
 }
 
-// JSON helper that always emits CORS (for non-provider routes)
+function commonSecurity() {
+  return {
+    "Cache-Control": "no-store",
+  };
+}
+
 function json(statusCode, bodyObj, origin, isProvider) {
   return {
     statusCode,
     headers: {
       "Content-Type": "application/json",
+      ...commonSecurity(),
       ...corsHeaders(origin, isProvider),
     },
     body: JSON.stringify(bodyObj),
@@ -64,11 +80,14 @@ function json(statusCode, bodyObj, origin, isProvider) {
 }
 
 exports.handler = async (event) => {
-  const origin = event.headers.origin || "";
+  const origin =
+    event.headers.origin ||
+    event.headers.Origin ||
+    event.headers.ORGIGIN || // (seen weird proxies)
+    "";
 
   // --- CORS preflight ---
   if (event.httpMethod === "OPTIONS") {
-    // reflect the actual allowed origin if present, else fall back to first allowed
     const allow =
       (origin && ALLOW_ORIGINS.has(origin) && origin) ||
       Array.from(ALLOW_ORIGINS)[0] ||
@@ -82,6 +101,7 @@ exports.handler = async (event) => {
           "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
         "Access-Control-Max-Age": "600",
         "Vary": "Origin",
+        ...commonSecurity(),
       },
     };
   }
@@ -90,9 +110,12 @@ exports.handler = async (event) => {
     return json(405, { ok: false, error: "Method not allowed" }, origin, false);
   }
 
-  // --- Normalize path (strip Netlify prefix and trailing slash) ---
+  // --- Normalize path (strip Netlify prefix and trailing slash, decode) ---
   let path = event.path || "";
   path = path.replace("/.netlify/functions/relay", "");
+  try {
+    path = decodeURIComponent(path);
+  } catch {}
   if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
 
   const envKey = ROUTE_MAP[path];
@@ -100,12 +123,33 @@ exports.handler = async (event) => {
   const isProvider = isProviderRoute(path);
 
   if (!upstream) {
-    return json(404, { ok: false, error: "Unknown route", path }, origin, isProvider);
+    return json(
+      404,
+      { ok: false, error: "Unknown route", path },
+      origin,
+      isProvider
+    );
   }
 
   // --- Enforce origin for browser calls (skip for provider) ---
   if (!isProvider && !ALLOW_ORIGINS.has(origin)) {
-    return json(403, { ok: false, error: "Forbidden origin" }, origin, isProvider);
+    return json(
+      403,
+      { ok: false, error: "Forbidden origin" },
+      origin,
+      isProvider
+    );
+  }
+
+  // Body size guard (defense-in-depth)
+  const raw = event.body || "";
+  if (raw.length > MAX_BODY) {
+    return json(
+      413,
+      { ok: false, error: "Payload too large" },
+      origin,
+      isProvider
+    );
   }
 
   // --- Verify HMAC (skip provider routes) ---
@@ -119,38 +163,63 @@ exports.handler = async (event) => {
 
     const ts = parseInt(tsHeader || "0", 10);
     if (!ts || Math.abs(Date.now() / 1000 - ts) > 300) {
-      return json(401, { ok: false, error: "Stale or missing timestamp" }, origin, isProvider);
+      return json(
+        401,
+        { ok: false, error: "Stale or missing timestamp" },
+        origin,
+        isProvider
+      );
     }
     if (!hmacHeader || !process.env.PUBLIC_HMAC_KEY) {
-      return json(401, { ok: false, error: "Missing HMAC or key" }, origin, isProvider);
+      return json(
+        401,
+        { ok: false, error: "Missing HMAC or key" },
+        origin,
+        isProvider
+      );
     }
 
-    const raw = event.body || "";
     const expected = crypto
       .createHmac("sha256", process.env.PUBLIC_HMAC_KEY)
       .update(raw + "\n" + ts)
       .digest("hex");
 
     if (!timingSafeEq(expected, hmacHeader)) {
-      return json(401, { ok: false, error: "Bad signature" }, origin, isProvider);
+      if (DEBUG) console.error("HMAC mismatch", { expected, got: hmacHeader });
+      return json(
+        401,
+        { ok: false, error: "Bad signature" },
+        origin,
+        isProvider
+      );
     }
   }
 
   // --- Forward to n8n ---
   try {
+    const ct =
+      event.headers["content-type"] ||
+      event.headers["Content-Type"] ||
+      "application/x-www-form-urlencoded";
+
     const resp = await fetch(upstream, {
       method: "POST",
       headers: {
-        "Content-Type":
-          event.headers["content-type"] || "application/x-www-form-urlencoded",
+        "Content-Type": ct,
+        "Accept": "application/json",
         "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET,
-        "X-Seoboss-Ts": event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
+        "X-Seoboss-Ts":
+          event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
         "X-Seoboss-Hmac":
-          event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "",
+          event.headers["x-seoboss-hmac"] ||
+          event.headers["X-Seoboss-Hmac"] ||
+          "",
         "X-Seoboss-Key-Id":
-          event.headers["x-seoboss-key-id"] || event.headers["X-Seoboss-Key-Id"] || "",
+          event.headers["x-seoboss-key-id"] ||
+          event.headers["X-Seoboss-Key-Id"] ||
+          "",
       },
-      body: event.body,
+      body: raw,
     });
 
     const text = await resp.text();
@@ -160,15 +229,16 @@ exports.handler = async (event) => {
       statusCode: resp.status,
       headers: {
         "Content-Type": contentType,
-        ...corsHeaders(origin, isProvider), // <- CORS on the actual POST response
+        ...commonSecurity(),
+        ...corsHeaders(origin, isProvider),
       },
       body: text,
     };
   } catch (err) {
-    // Network or upstream error
+    if (DEBUG) console.error("Upstream error:", err);
     return json(
       502,
-      { ok: false, error: "Upstream error", detail: String(err && err.message || err) },
+      { ok: false, error: "Upstream error" },
       origin,
       isProvider
     );
