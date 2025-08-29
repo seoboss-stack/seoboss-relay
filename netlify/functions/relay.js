@@ -3,7 +3,7 @@ const crypto = require("crypto");
 
 const ALLOW_ORIGINS = new Set([
   "https://seoboss.com",
-  // "http://localhost:3000", // enable if testing locally
+  // "http://localhost:3000", // ← uncomment when testing locally
 ]);
 
 const ROUTE_MAP = {
@@ -38,13 +38,25 @@ function timingSafeEq(a, b) {
   return A.length === B.length && crypto.timingSafeEqual(A, B);
 }
 
-// ✅ helper: JSON response that always includes CORS for non-provider routes
+function corsHeaders(origin, isProvider) {
+  if (isProvider) return {};
+  if (!origin) return {};
+  return {
+    "Access-Control-Allow-Origin": origin,
+    "Access-Control-Allow-Headers":
+      "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Vary": "Origin",
+  };
+}
+
+// JSON helper that always emits CORS (for non-provider routes)
 function json(statusCode, bodyObj, origin, isProvider) {
   return {
     statusCode,
     headers: {
       "Content-Type": "application/json",
-      ...(isProvider ? {} : (origin ? { "Access-Control-Allow-Origin": origin } : {})),
+      ...corsHeaders(origin, isProvider),
     },
     body: JSON.stringify(bodyObj),
   };
@@ -53,28 +65,34 @@ function json(statusCode, bodyObj, origin, isProvider) {
 exports.handler = async (event) => {
   const origin = event.headers.origin || "";
 
-  // CORS preflight
+  // --- CORS preflight ---
   if (event.httpMethod === "OPTIONS") {
-    const anyOrigin = Array.from(ALLOW_ORIGINS)[0] || "*";
+    // reflect the actual allowed origin if present, else fall back to first allowed
+    const allow =
+      (origin && ALLOW_ORIGINS.has(origin) && origin) ||
+      Array.from(ALLOW_ORIGINS)[0] ||
+      "*";
     return {
       statusCode: 204,
       headers: {
-        "Access-Control-Allow-Origin": anyOrigin,
+        "Access-Control-Allow-Origin": allow,
         "Access-Control-Allow-Methods": "POST, OPTIONS",
         "Access-Control-Allow-Headers":
           "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+        "Access-Control-Max-Age": "600",
+        "Vary": "Origin",
       },
     };
   }
 
   if (event.httpMethod !== "POST") {
-    // include CORS even on 405
     return json(405, { ok: false, error: "Method not allowed" }, origin, false);
   }
 
-  // Normalize path (strip Netlify prefix if present)
+  // --- Normalize path (strip Netlify prefix and trailing slash) ---
   let path = event.path || "";
   path = path.replace("/.netlify/functions/relay", "");
+  if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
 
   const envKey = ROUTE_MAP[path];
   const upstream = envKey ? process.env[envKey] : null;
@@ -84,19 +102,19 @@ exports.handler = async (event) => {
     return json(404, { ok: false, error: "Unknown route", path }, origin, isProvider);
   }
 
-  // Enforce origin for browser calls (skip for provider)
+  // --- Enforce origin for browser calls (skip for provider) ---
   if (!isProvider && !ALLOW_ORIGINS.has(origin)) {
     return json(403, { ok: false, error: "Forbidden origin" }, origin, isProvider);
   }
 
-  // Verify HMAC (skip Shopify/provider routes)
+  // --- Verify HMAC (skip provider routes) ---
   if (!isProvider) {
-    const tsHeader =
-      event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"];
-    const hmacHeader =
-      (event.headers["x-seoboss-hmac"] ||
-        event.headers["X-Seoboss-Hmac"] ||
-        "").toLowerCase();
+    const tsHeader = event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"];
+    const hmacHeader = (
+      event.headers["x-seoboss-hmac"] ||
+      event.headers["X-Seoboss-Hmac"] ||
+      ""
+    ).toLowerCase();
 
     const ts = parseInt(tsHeader || "0", 10);
     if (!ts || Math.abs(Date.now() / 1000 - ts) > 300) {
@@ -117,33 +135,41 @@ exports.handler = async (event) => {
     }
   }
 
-  // Forward to n8n
-  const resp = await fetch(upstream, {
-    method: "POST",
-    headers: {
-      "Content-Type":
-        event.headers["content-type"] || "application/x-www-form-urlencoded",
-      "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET,
-      "X-Seoboss-Ts":
-        event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
-      "X-Seoboss-Hmac":
-        event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "",
-      "X-Seoboss-Key-Id":
-        event.headers["x-seoboss-key-id"] ||
-        event.headers["X-Seoboss-Key-Id"] ||
-        "",
-    },
-    body: event.body,
-  });
+  // --- Forward to n8n ---
+  try {
+    const resp = await fetch(upstream, {
+      method: "POST",
+      headers: {
+        "Content-Type":
+          event.headers["content-type"] || "application/x-www-form-urlencoded",
+        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET,
+        "X-Seoboss-Ts": event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
+        "X-Seoboss-Hmac":
+          event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "",
+        "X-Seoboss-Key-Id":
+          event.headers["x-seoboss-key-id"] || event.headers["X-Seoboss-Key-Id"] || "",
+      },
+      body: event.body,
+    });
 
-  const text = await resp.text();
-  // include CORS on success, too
-  return {
-    statusCode: resp.status,
-    headers: {
-      "Content-Type": "application/json",
-      ...(isProvider ? {} : (origin ? { "Access-Control-Allow-Origin": origin } : {})),
-    },
-    body: text,
-  };
+    const text = await resp.text();
+    const contentType = resp.headers.get("content-type") || "application/json";
+
+    return {
+      statusCode: resp.status,
+      headers: {
+        "Content-Type": contentType,
+        ...corsHeaders(origin, isProvider), // <- CORS on the actual POST response
+      },
+      body: text,
+    };
+  } catch (err) {
+    // Network or upstream error
+    return json(
+      502,
+      { ok: false, error: "Upstream error", detail: String(err && err.message || err) },
+      origin,
+      isProvider
+    );
+  }
 };
