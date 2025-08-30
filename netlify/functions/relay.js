@@ -1,11 +1,29 @@
-// netlify/functions/relay.js — secure API relay (hardened)
+// netlify/functions/relay.js — secure API relay (with Shopify origin allow + logging)
 const crypto = require("crypto");
 
-const ALLOW_ORIGINS = new Set([
+// ===== ALLOWLIST (no env required) =====
+// - Your site
+// - Your specific myshopify domain
+// - Shopify Admin (useful when testing in Theme Editor)
+// - Any *.myshopify.com storefront (suffix match)
+const STATIC_ALLOW = new Set([
   "https://seoboss.com",
-  // "http://localhost:3000", // ← uncomment when testing locally
+  "https://t5wicb-gi.myshopify.com",
+  "https://admin.shopify.com",
 ]);
 
+function isAllowedOrigin(origin) {
+  if (!origin) return false;
+  if (STATIC_ALLOW.has(origin)) return true;
+  try {
+    const u = new URL(origin);
+    return u.hostname.endsWith(".myshopify.com");
+  } catch {
+    return false;
+  }
+}
+
+// ===== Route map (unchanged) =====
 const ROUTE_MAP = {
   // Engine
   "/seoboss/api/hints":                "N8N_HINTS_URL",
@@ -24,7 +42,7 @@ const ROUTE_MAP = {
   "/seoboss/api/shop/blogs":           "N8N_SHOP_LIST_BLOGS_URL",
   "/seoboss/api/shop/import-articles": "N8N_SHOP_IMPORT_URL",
 
-  // Provider (Shopify webhooks etc.)
+  // Provider (Shopify webhooks etc.) — skips browser HMAC
   "/seoboss/api/shopify":              "N8N_SHOPIFY_URL",
 };
 
@@ -35,36 +53,26 @@ function isProviderRoute(path) {
   return path === "/seoboss/api/shopify";
 }
 
-function timingSafeEq(a, b) {
-  const A = Buffer.from(a, "hex");
-  const B = Buffer.from(b, "hex");
+function timingSafeEqHex(hexA, hexB) {
+  const A = Buffer.from(String(hexA || ""), "hex");
+  const B = Buffer.from(String(hexB || ""), "hex");
   return A.length === B.length && crypto.timingSafeEqual(A, B);
 }
 
-function baseCors(origin) {
-  return origin
-    ? {
-        "Access-Control-Allow-Origin": origin,
-        "Vary": "Origin",
-      }
-    : {};
-}
-
-// Full CORS for non-provider routes
 function corsHeaders(origin, isProvider) {
-  if (isProvider) return {};
+  if (isProvider) return {}; // providers (Shopify) manage their own auth; no browser CORS needed
+  if (!origin) return {};
   return {
-    ...baseCors(origin),
-    "Access-Control-Allow-Headers":
-      "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+    "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Headers": "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+    "Access-Control-Allow-Credentials": "true",
+    "Vary": "Origin",
   };
 }
 
-function commonSecurity() {
-  return {
-    "Cache-Control": "no-store",
-  };
+function securityHeaders() {
+  return { "Cache-Control": "no-store" };
 }
 
 function json(statusCode, bodyObj, origin, isProvider) {
@@ -72,7 +80,7 @@ function json(statusCode, bodyObj, origin, isProvider) {
     statusCode,
     headers: {
       "Content-Type": "application/json",
-      ...commonSecurity(),
+      ...securityHeaders(),
       ...corsHeaders(origin, isProvider),
     },
     body: JSON.stringify(bodyObj),
@@ -80,167 +88,134 @@ function json(statusCode, bodyObj, origin, isProvider) {
 }
 
 exports.handler = async (event) => {
+  const started = Date.now();
+  const rid = Math.random().toString(36).slice(2, 8);
+
   const origin =
     event.headers.origin ||
     event.headers.Origin ||
-    event.headers.ORGIGIN || // (seen weird proxies)
+    event.headers.ORGIGIN || // seen weird proxies
     "";
 
-  // --- CORS preflight ---
+  // Preflight
   if (event.httpMethod === "OPTIONS") {
-    const allow =
-      (origin && ALLOW_ORIGINS.has(origin) && origin) ||
-      Array.from(ALLOW_ORIGINS)[0] ||
-      "*";
+    const allow = isAllowedOrigin(origin) ? origin : "https://seoboss.com";
     return {
       statusCode: 204,
       headers: {
         "Access-Control-Allow-Origin": allow,
         "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers":
-          "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+        "Access-Control-Allow-Headers": "Content-Type, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
         "Access-Control-Max-Age": "600",
         "Vary": "Origin",
-        ...commonSecurity(),
+        ...securityHeaders(),
       },
     };
   }
 
   if (event.httpMethod !== "POST") {
-    return json(405, { ok: false, error: "Method not allowed" }, origin, false);
+    console.log(`[relay] rid=${rid} 405 method=${event.httpMethod}`);
+    return json(405, { ok: false, error: "method_not_allowed" }, origin, false);
   }
 
-  // --- Normalize path (strip Netlify prefix and trailing slash, decode) ---
+  // Normalize path (strip Netlify function prefix, decode, trim trailing slash)
   let path = event.path || "";
   path = path.replace("/.netlify/functions/relay", "");
-  try {
-    path = decodeURIComponent(path);
-  } catch {}
+  try { path = decodeURIComponent(path); } catch {}
   if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
 
   const envKey = ROUTE_MAP[path];
   const upstream = envKey ? process.env[envKey] : null;
-  const isProvider = isProviderRoute(path);
+  const provider = isProviderRoute(path);
+
+  console.log(`[relay] rid=${rid} start path=${path} origin=${origin || "-"} provider=${provider}`);
 
   if (!upstream) {
-    return json(
-      404,
-      { ok: false, error: "Unknown route", path },
-      origin,
-      isProvider
-    );
+    console.log(`[relay] rid=${rid} 404 unknown_route`);
+    return json(404, { ok: false, error: "unknown_route", path }, origin, provider);
   }
 
-  // --- Enforce origin for browser calls (skip for provider) ---
-  if (!isProvider && !ALLOW_ORIGINS.has(origin)) {
-    return json(
-      403,
-      { ok: false, error: "Forbidden origin" },
-      origin,
-      isProvider
-    );
+  // Enforce browser origin (skip for provider routes)
+  if (!provider && !isAllowedOrigin(origin)) {
+    console.log(`[relay] rid=${rid} 403 forbidden_origin`);
+    return json(403, { ok: false, error: "forbidden_origin" }, origin, provider);
   }
 
-  // Body size guard (defense-in-depth)
+  // Body guard
   const raw = event.body || "";
   if (raw.length > MAX_BODY) {
-    return json(
-      413,
-      { ok: false, error: "Payload too large" },
-      origin,
-      isProvider
-    );
+    console.log(`[relay] rid=${rid} 413 payload_too_large len=${raw.length}`);
+    return json(413, { ok: false, error: "payload_too_large" }, origin, provider);
   }
 
-  // --- Verify HMAC (skip provider routes) ---
-  if (!isProvider) {
+  // Verify HMAC (skip for provider routes)
+  if (!provider) {
     const tsHeader = event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"];
-    const hmacHeader = (
-      event.headers["x-seoboss-hmac"] ||
-      event.headers["X-Seoboss-Hmac"] ||
-      ""
-    ).toLowerCase();
+    const hmacHeader = (event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "").toLowerCase();
 
     const ts = parseInt(tsHeader || "0", 10);
     if (!ts || Math.abs(Date.now() / 1000 - ts) > 300) {
-      return json(
-        401,
-        { ok: false, error: "Stale or missing timestamp" },
-        origin,
-        isProvider
-      );
+      console.log(`[relay] rid=${rid} 401 stale_ts ts=${tsHeader || "-"}`);
+      return json(401, { ok: false, error: "stale_or_missing_timestamp" }, origin, provider);
     }
     if (!hmacHeader || !process.env.PUBLIC_HMAC_KEY) {
-      return json(
-        401,
-        { ok: false, error: "Missing HMAC or key" },
-        origin,
-        isProvider
-      );
+      console.log(`[relay] rid=${rid} 401 missing_hmac`);
+      return json(401, { ok: false, error: "missing_hmac_or_key" }, origin, provider);
     }
 
-    const expected = crypto
-      .createHmac("sha256", process.env.PUBLIC_HMAC_KEY)
+    const expected = crypto.createHmac("sha256", process.env.PUBLIC_HMAC_KEY)
       .update(raw + "\n" + ts)
       .digest("hex");
 
-    if (!timingSafeEq(expected, hmacHeader)) {
-      if (DEBUG) console.error("HMAC mismatch", { expected, got: hmacHeader });
-      return json(
-        401,
-        { ok: false, error: "Bad signature" },
-        origin,
-        isProvider
-      );
+    if (!timingSafeEqHex(expected, hmacHeader)) {
+      if (DEBUG) console.error(`[relay] rid=${rid} 401 bad_sig exp=${expected.slice(0,8)} got=${hmacHeader.slice(0,8)}`);
+      return json(401, { ok: false, error: "bad_signature" }, origin, provider);
     }
   }
 
-  // --- Forward to n8n ---
+  // Forward to n8n with a safety timeout (25s)
   try {
     const ct =
       event.headers["content-type"] ||
       event.headers["Content-Type"] ||
       "application/x-www-form-urlencoded";
 
+    const controller = new AbortController();
+    const t = setTimeout(() => controller.abort(), 25_000);
+
     const resp = await fetch(upstream, {
       method: "POST",
       headers: {
         "Content-Type": ct,
         "Accept": "application/json",
-        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET,
-        "X-Seoboss-Ts":
-          event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
-        "X-Seoboss-Hmac":
-          event.headers["x-seoboss-hmac"] ||
-          event.headers["X-Seoboss-Hmac"] ||
-          "",
-        "X-Seoboss-Key-Id":
-          event.headers["x-seoboss-key-id"] ||
-          event.headers["X-Seoboss-Key-Id"] ||
-          "",
+        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
+        "X-Seoboss-Ts": event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
+        "X-Seoboss-Hmac": event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "",
+        "X-Seoboss-Key-Id": event.headers["x-seoboss-key-id"] || event.headers["X-Seoboss-Key-Id"] || "",
       },
       body: raw,
+      signal: controller.signal,
     });
+
+    clearTimeout(t);
 
     const text = await resp.text();
     const contentType = resp.headers.get("content-type") || "application/json";
 
+    console.log(`[relay] rid=${rid} upstream=${resp.status} dur_ms=${Date.now() - started}`);
+
+    // Pass-through (ensure CORS back to the browser)
     return {
       statusCode: resp.status,
       headers: {
         "Content-Type": contentType,
-        ...commonSecurity(),
-        ...corsHeaders(origin, isProvider),
+        ...securityHeaders(),
+        ...corsHeaders(origin, provider),
       },
       body: text,
     };
   } catch (err) {
-    if (DEBUG) console.error("Upstream error:", err);
-    return json(
-      502,
-      { ok: false, error: "Upstream error" },
-      origin,
-      isProvider
-    );
+    console.log(`[relay] rid=${rid} 502 upstream_error dur_ms=${Date.now() - started} msg=${err.message}`);
+    return json(502, { ok: false, error: "upstream_error" }, origin, provider);
   }
 };
