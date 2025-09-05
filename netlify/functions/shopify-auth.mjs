@@ -6,7 +6,7 @@ export const handler = async (event) => {
 
   const params = new URLSearchParams({
     client_id: process.env.SHOPIFY_API_KEY,
-    scope: "", // no admin scopes needed
+    scope: "read_content", // <-- add this
     redirect_uri: `${process.env.APP_URL}/.netlify/functions/shopify-callback`,
     state: crypto.randomUUID(),
   });
