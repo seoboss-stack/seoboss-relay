@@ -17,3 +17,10 @@
   to = "/.netlify/functions/relay/seoboss/api/:splat"
   status = 200
   force = true
+
+# App Proxy → Engine Proxy function
+[[redirects]]
+  from = "/proxy/*"
+  to = "/.netlify/functions/engine-proxy/:splat"
+  status = 200
+  force = true
