@@ -1,61 +1,89 @@
-// Shopify App Proxy verifier + forwarder (safe-mode)
+// netlify/functions/engine-proxy.mjs
 import crypto from "node:crypto";
 
-function ok(status, body, extra={}) {
-  return { statusCode: status, headers: { "Content-Type": "application/json; charset=utf-8", ...extra }, body: JSON.stringify(body) };
+const ORIGIN = "https://seoboss.com"; // CORS for your UI
+
+function json(status, data) {
+  return {
+    statusCode: status,
+    headers: {
+      "Content-Type": "application/json",
+      "Access-Control-Allow-Origin": ORIGIN,
+      "Access-Control-Expose-Headers": "Content-Type",
+    },
+    body: JSON.stringify(data),
+  };
 }
-function verifyShopifyProxy(qs, secret) {
-  // App Proxy sends ?shop=...&timestamp=...&signature=...
-  const { signature, ...rest } = qs || {};
-  if (!signature || !secret) return false;
-  const base = Object.keys(rest).sort().map(k => `${k}=${rest[k]}`).join("");
-  const dig  = crypto.createHmac("sha256", secret).update(base, "utf8").digest("hex");
+
+function getSuffix(url) {
+  // Strip function mount or /proxy prefix once
+  let p = url.pathname;
+  p = p.replace(/^\/\.netlify\/functions\/engine-proxy/, "");
+  p = p.replace(/^\/proxy/, "");
+  return p || "/";
+}
+
+function verifyAppProxy(url, secret) {
+  if (!secret) return false;
+  // App Proxy signs all query params except `signature`
+  const pairs = [];
+  url.searchParams.forEach((v, k) => {
+    if (k !== "signature") pairs.push([k, v]);
+  });
+  pairs.sort((a, b) => a[0].localeCompare(b[0]));
+  const message = pairs.map(([k, v]) => `${k}=${v}`).join(""); // no separators
+  const digest = crypto.createHmac("sha256", secret).update(message, "utf8").digest("hex");
+  const sig = url.searchParams.get("signature") || "";
   try {
-    const a = Buffer.from(String(signature), "hex");
-    const b = Buffer.from(dig, "hex");
-    return a.length === b.length && crypto.timingSafeEqual(a, b);
-  } catch { return false; }
+    return crypto.timingSafeEqual(Buffer.from(digest, "hex"), Buffer.from(sig, "hex"));
+  } catch {
+    return false;
+  }
 }
 
 export const handler = async (event) => {
-  // health check path (no signature) so you can verify deploy first
-  const suffix = (event.path || "").replace(/^.*engine-proxy/, "") || "/";
-  if (suffix === "/_alive") return ok(200, { ok: true, service: "engine-proxy", version: "1" });
+  const url = new URL(event.rawUrl);
+  const suffix = getSuffix(url);
 
-  // verify Shopify App Proxy signature
-  const qs = event.queryStringParameters || {};
-  if (!verifyShopifyProxy(qs, process.env.SHOPIFY_APP_SECRET)) {
-    return ok(401, { error: "bad signature" });
+  // 0) health check (no signature)
+  if (suffix === "/_alive") {
+    return json(200, { ok: true, service: "engine-proxy", t: Date.now() });
   }
 
-  // identify shop + (optional) registry lookup (stub for now)
-  const shop = qs.shop || "";
-  const registry = { client_id: "cli_demo", sheet_id: "sheet_123", status: "active" };
-  if (registry.status !== "active") return ok(403, { error: "inactive" });
+  // 1) verify Shopify App Proxy signature
+  if (!verifyAppProxy(url, process.env.SHOPIFY_APP_SECRET)) {
+    return json(401, { error: "bad signature" });
+  }
 
-  // forward to n8n (preserve subpath after /proxy/*)
+  // 2) forward to n8n
   const base = (process.env.N8N_ENGINE_BASE_URL || process.env.N8N_ENGINE_WEBHOOK_URL || "").replace(/\/$/, "");
-  const target = base + (suffix || "/run");
+  if (!base) return json(500, { error: "missing N8N_ENGINE_BASE_URL" });
 
+  const target = `${base}${suffix === "/" ? "/run" : suffix}`;
   const method = event.httpMethod || "GET";
-  const passBody = ["POST","PUT","PATCH"].includes(method);
-  const raw = event.isBase64Encoded ? Buffer.from(event.body||"", "base64").toString("utf8") : (event.body||"");
+  const needsBody = ["POST", "PUT", "PATCH"].includes(method);
+  const rawBody = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf8") : (event.body || "");
 
-  const ts = Math.floor(Date.now()/1000);
-  const res = await fetch(target, {
+  const resp = await fetch(target, {
     method,
     headers: {
       "Content-Type": event.headers?.["content-type"] || "application/json",
       "X-Channel": "shopify-proxy",
-      "X-Shop": shop,
-      "X-Client-Id": registry.client_id,
-      "X-Sheet-Id": registry.sheet_id,
+      "X-Shop": url.searchParams.get("shop") || "",
       "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
-      "X-Seoboss-Ts": String(ts)
+      "X-Seoboss-Ts": String(Math.floor(Date.now() / 1000)),
     },
-    body: passBody ? raw : undefined
+    body: needsBody ? rawBody : undefined,
   });
 
-  const text = await res.text();
-  return { statusCode: res.status, headers: { "Content-Type": res.headers.get("content-type") || "application/json" }, body: text };
+  const text = await resp.text();
+  return {
+    statusCode: resp.status,
+    headers: {
+      "Content-Type": resp.headers.get("content-type") || "application/json",
+      "Access-Control-Allow-Origin": ORIGIN,
+      "Access-Control-Expose-Headers": "Content-Type",
+    },
+    body: text,
+  };
 };
