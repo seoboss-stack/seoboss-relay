@@ -8,10 +8,15 @@ export const handler = async (event) => {
 
   const url = new URL(event.rawUrl);
   const params = Object.fromEntries(url.searchParams.entries());
-  const { shop, hmac, code } = params;
+  const { shop, hmac, code, state } = params;
   if (!shop || !hmac || !code) return { statusCode: 400, body: "missing params" };
 
-  // Verify HMAC (exclude hmac & signature)
+  // (optional) light sanity check
+  if (!/\.myshopify\.com$/i.test(shop)) {
+    return { statusCode: 400, body: "invalid shop" };
+  }
+
+  // Build message (exclude hmac & signature)
   const msg = Object.keys(params)
     .filter(k => k !== "hmac" && k !== "signature")
     .sort()
@@ -19,7 +24,11 @@ export const handler = async (event) => {
     .join("&");
 
   const digest = crypto.createHmac("sha256", SECRET).update(msg).digest("hex");
-  if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(digest, "hex"))) {
+
+  // 👉 timingSafeEqual throws if lengths differ—guard first
+  const bufA = Buffer.from(hmac, "hex");
+  const bufB = Buffer.from(digest, "hex");
+  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
     return { statusCode: 401, body: "invalid hmac" };
   }
 
@@ -33,8 +42,10 @@ export const handler = async (event) => {
     const err = await resp.text();
     return { statusCode: 502, body: `token exchange failed: ${err}` };
   }
+  const { access_token, scope } = await resp.json();
 
-  // TODO: save {shop, access_token, scope} if/when needed
+  // TODO: persist {shop, access_token, scope} if/when needed
+  // TODO (public apps): register privacy webhooks + app/uninstalled
 
   return { statusCode: 302, headers: { Location: `${APP_URL}/installed` } };
 };
