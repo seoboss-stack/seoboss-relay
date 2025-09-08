@@ -8,15 +8,10 @@ export const handler = async (event) => {
 
   const url = new URL(event.rawUrl);
   const params = Object.fromEntries(url.searchParams.entries());
-  const { shop, hmac, code, state } = params;
+  const { shop, hmac, code } = params;
   if (!shop || !hmac || !code) return { statusCode: 400, body: "missing params" };
 
-  // (optional) light sanity check
-  if (!/\.myshopify\.com$/i.test(shop)) {
-    return { statusCode: 400, body: "invalid shop" };
-  }
-
-  // Build message (exclude hmac & signature)
+  // Verify HMAC (exclude hmac & signature)
   const msg = Object.keys(params)
     .filter(k => k !== "hmac" && k !== "signature")
     .sort()
@@ -24,15 +19,11 @@ export const handler = async (event) => {
     .join("&");
 
   const digest = crypto.createHmac("sha256", SECRET).update(msg).digest("hex");
-
-  // 👉 timingSafeEqual throws if lengths differ—guard first
-  const bufA = Buffer.from(hmac, "hex");
-  const bufB = Buffer.from(digest, "hex");
-  if (bufA.length !== bufB.length || !crypto.timingSafeEqual(bufA, bufB)) {
+  if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(digest, "hex"))) {
     return { statusCode: 401, body: "invalid hmac" };
   }
 
-  // Exchange code → token
+  // 1) Exchange code → access token
   const resp = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -44,8 +35,27 @@ export const handler = async (event) => {
   }
   const { access_token, scope } = await resp.json();
 
-  // TODO: persist {shop, access_token, scope} if/when needed
-  // TODO (public apps): register privacy webhooks + app/uninstalled
+  // 2) SAVE to your Registry (n8n) — NEW
+  try {
+    await fetch(process.env.N8N_SHOP_UPSERT_URL, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || ""
+      },
+      body: JSON.stringify({
+        shop,
+        access_token,
+        scope,
+        installed_at: new Date().toISOString(),
+        status: "active"
+      })
+    });
+  } catch (e) {
+    // don’t block install if telemetry save fails
+    console.error("registry upsert failed:", e?.message);
+  }
 
+  // 3) Redirect to your post-install page
   return { statusCode: 302, headers: { Location: `${APP_URL}/installed` } };
 };
