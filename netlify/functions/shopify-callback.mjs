@@ -45,7 +45,7 @@ export const handler = async (event) => {
     return { statusCode: 401, body: "bad state" };
   }
 
-  // Replay guard (10 minutes window)
+  // Replay guard (10 minutes)
   const ts = Number(timestamp || 0);
   if (!ts || Math.abs(Date.now() / 1000 - ts) > 600) {
     return { statusCode: 401, body: "stale oauth" };
@@ -89,6 +89,7 @@ export const handler = async (event) => {
       headers: {
         "Content-Type": "application/json",
         "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
+        "X-Seoboss-Ts": String(Math.floor(Date.now()/1000)), // <-- required by your n8n validator
       },
       body: JSON.stringify({
         shop,
