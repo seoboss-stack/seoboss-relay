@@ -23,19 +23,32 @@ function getSuffix(url) {
   return p || "/";
 }
 
+// Shopify App Proxy signature:
+// - remove "signature"
+// - sort keys
+// - if duplicate keys exist, join their values by comma
+// - concat as key=value with NO separators between pairs
 function verifyAppProxy(url, secret) {
   if (!secret) return false;
-  // App Proxy signs all query params except `signature`
-  const pairs = [];
-  url.searchParams.forEach((v, k) => {
-    if (k !== "signature") pairs.push([k, v]);
-  });
-  pairs.sort((a, b) => a[0].localeCompare(b[0]));
-  const message = pairs.map(([k, v]) => `${k}=${v}`).join(""); // no separators
+
+  const map = {};
+  for (const [k, v] of url.searchParams.entries()) {
+    if (k === "signature") continue;
+    if (!map[k]) map[k] = [];
+    map[k].push(v);
+  }
+  const message = Object.keys(map)
+    .sort()
+    .map((k) => `${k}=${map[k].join(",")}`)
+    .join("");
+
   const digest = crypto.createHmac("sha256", secret).update(message, "utf8").digest("hex");
   const sig = url.searchParams.get("signature") || "";
   try {
-    return crypto.timingSafeEqual(Buffer.from(digest, "hex"), Buffer.from(sig, "hex"));
+    return (
+      sig.length === digest.length &&
+      crypto.timingSafeEqual(Buffer.from(digest, "hex"), Buffer.from(sig, "hex"))
+    );
   } catch {
     return false;
   }
@@ -51,7 +64,11 @@ export const handler = async (event) => {
   }
 
   // 1) verify Shopify App Proxy signature
-  if (!verifyAppProxy(url, process.env.SHOPIFY_APP_SECRET)) {
+  const SECRET =
+    process.env.SHOPIFY_APP_SECRET_PUBLIC ||
+    process.env.SHOPIFY_APP_SECRET ||
+    "";
+  if (!verifyAppProxy(url, SECRET)) {
     return json(401, { error: "bad signature" });
   }
 
@@ -59,19 +76,31 @@ export const handler = async (event) => {
   const base = (process.env.N8N_ENGINE_BASE_URL || process.env.N8N_ENGINE_WEBHOOK_URL || "").replace(/\/$/, "");
   if (!base) return json(500, { error: "missing N8N_ENGINE_BASE_URL" });
 
-  const target = `${base}${suffix === "/" ? "/run" : suffix}`;
+  // forward all query params EXCEPT signature
+  const fwdQS = new URLSearchParams(url.searchParams);
+  fwdQS.delete("signature");
+  const qs = fwdQS.toString();
+  const path = suffix === "/" ? "/run" : suffix;
+  const target = `${base}${path}${qs ? `?${qs}` : ""}`;
+
   const method = event.httpMethod || "GET";
   const needsBody = ["POST", "PUT", "PATCH"].includes(method);
-  const rawBody = event.isBase64Encoded ? Buffer.from(event.body || "", "base64").toString("utf8") : (event.body || "");
+  const rawBody = event.isBase64Encoded
+    ? Buffer.from(event.body || "", "base64").toString("utf8")
+    : (event.body || "");
+
+  const headers = event.headers || {};
+  const loggedInId = url.searchParams.get("logged_in_customer_id") || "";
 
   const resp = await fetch(target, {
     method,
     headers: {
-      "Content-Type": event.headers?.["content-type"] || "application/json",
+      "Content-Type": headers["content-type"] || headers["Content-Type"] || "application/json",
       "X-Channel": "shopify-proxy",
       "X-Shop": url.searchParams.get("shop") || "",
-      "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
+      "X-Logged-In-Customer-Id": loggedInId,
       "X-Seoboss-Ts": String(Math.floor(Date.now() / 1000)),
+      "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
     },
     body: needsBody ? rawBody : undefined,
   });
