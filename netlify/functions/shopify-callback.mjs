@@ -1,61 +1,115 @@
 // netlify/functions/shopify-callback.mjs
 import crypto from "node:crypto";
 
+function parseCookies(header = "") {
+  return Object.fromEntries(
+    header
+      .split(/; */)
+      .filter(Boolean)
+      .map((c) => {
+        const i = c.indexOf("=");
+        if (i === -1) return [c, ""];
+        const k = c.slice(0, i).trim();
+        const v = decodeURIComponent(c.slice(i + 1));
+        return [k, v];
+      })
+  );
+}
+
 export const handler = async (event) => {
   const APP_URL = process.env.APP_URL || "https://hooks.seoboss.com";
-  const API_KEY = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY;
-  const SECRET  = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET;
+  const API_KEY =
+    process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
+  const SECRET =
+    process.env.SHOPIFY_APP_SECRET_PUBLIC ||
+    process.env.SHOPIFY_APP_SECRET ||
+    "";
+
+  if (!API_KEY || !SECRET) {
+    return { statusCode: 500, body: "missing API key/secret" };
+  }
 
   const url = new URL(event.rawUrl);
-  const params = Object.fromEntries(url.searchParams.entries());
-  const { shop, hmac, code } = params;
-  if (!shop || !hmac || !code) return { statusCode: 400, body: "missing params" };
+  const q = Object.fromEntries(url.searchParams.entries());
+  const { shop, hmac, code, state, timestamp } = q;
 
-  // Verify HMAC (exclude hmac & signature)
-  const msg = Object.keys(params)
-    .filter(k => k !== "hmac" && k !== "signature")
+  // Validate shop format
+  const shopRe = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
+  if (!shopRe.test(shop || "")) {
+    return { statusCode: 400, body: "invalid shop" };
+  }
+
+  // Verify state (CSRF)
+  const cookies = parseCookies(event.headers?.cookie || event.headers?.Cookie || "");
+  if (!state || cookies.shopify_oauth_state !== state) {
+    return { statusCode: 401, body: "bad state" };
+  }
+
+  // Optional replay guard (10 minutes window)
+  const ts = Number(timestamp || 0);
+  if (!ts || Math.abs(Date.now() / 1000 - ts) > 600) {
+    return { statusCode: 401, body: "stale oauth" };
+  }
+
+  if (!hmac || !code) {
+    return { statusCode: 400, body: "missing params" };
+  }
+
+  // Build message for HMAC check (exclude hmac & signature)
+  const message = Object.keys(q)
+    .filter((k) => k !== "hmac" && k !== "signature")
     .sort()
-    .map(k => `${k}=${params[k]}`)
+    .map((k) => `${k}=${q[k]}`)
     .join("&");
 
-  const digest = crypto.createHmac("sha256", SECRET).update(msg).digest("hex");
-  if (!crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(digest, "hex"))) {
+  const digest = crypto.createHmac("sha256", SECRET).update(message).digest("hex");
+  const safe =
+    hmac.length === digest.length &&
+    crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(digest, "hex"));
+  if (!safe) {
     return { statusCode: 401, body: "invalid hmac" };
   }
 
-  // 1) Exchange code → access token
-  const resp = await fetch(`https://${shop}/admin/oauth/access_token`, {
+  // Exchange code → access token (OFFLINE)
+  const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ client_id: API_KEY, client_secret: SECRET, code }),
   });
-  if (!resp.ok) {
-    const err = await resp.text();
+  if (!tokenRes.ok) {
+    const err = await tokenRes.text();
     return { statusCode: 502, body: `token exchange failed: ${err}` };
   }
-  const { access_token, scope } = await resp.json();
+  const { access_token, scope } = await tokenRes.json();
 
-  // 2) SAVE to your Registry (n8n) — NEW
+  // Upsert into your Registry via n8n (non-blocking)
   try {
     await fetch(process.env.N8N_SHOP_UPSERT_URL, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || ""
+        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
       },
       body: JSON.stringify({
         shop,
         access_token,
         scope,
         installed_at: new Date().toISOString(),
-        status: "active"
-      })
+        status: "active",
+      }),
     });
-  } catch (e) {
-    // don’t block install if telemetry save fails
-    console.error("registry upsert failed:", e?.message);
+  } catch {
+    // don't block install on telemetry errors
   }
 
-  // 3) Redirect to your post-install page
-  return { statusCode: 302, headers: { Location: `${APP_URL}/installed` } };
+  // Clear state cookie and redirect to your post-install page
+  return {
+    statusCode: 302,
+    headers: {
+      Location: `${APP_URL}/installed?shop=${encodeURIComponent(shop)}&installed=1`,
+      "Set-Cookie":
+        "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+    },
+    body: "",
+  };
 };
