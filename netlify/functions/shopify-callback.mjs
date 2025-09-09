@@ -45,7 +45,7 @@ export const handler = async (event) => {
     return { statusCode: 401, body: "bad state" };
   }
 
-  // Optional replay guard (10 minutes window)
+  // Replay guard (10 minutes window)
   const ts = Number(timestamp || 0);
   if (!ts || Math.abs(Date.now() / 1000 - ts) > 600) {
     return { statusCode: 401, body: "stale oauth" };
@@ -102,11 +102,11 @@ export const handler = async (event) => {
     // don't block install on telemetry errors
   }
 
-  // Clear state cookie and redirect to your post-install page
+  // Redirect to your onboarding page and clear state cookie
   return {
     statusCode: 302,
     headers: {
-      Location: `${APP_URL}/installed?shop=${encodeURIComponent(shop)}&installed=1`,
+      Location: `https://seoboss.com/pages/connect?shop=${encodeURIComponent(shop)}&installed=1`,
       "Set-Cookie":
         "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
     },
