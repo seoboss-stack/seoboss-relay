@@ -1,32 +1,70 @@
 // netlify/functions/uninstalled.mjs
 import crypto from "node:crypto";
 
-function verifyWebhook(raw, hmac, secret) {
-  const digest = crypto.createHmac("sha256", secret).update(raw, "utf8").digest("base64");
-  return crypto.timingSafeEqual(Buffer.from(digest), Buffer.from(hmac || "", "base64"));
+function toLowerHeaders(h = {}) {
+  return Object.fromEntries(Object.entries(h).map(([k, v]) => [k.toLowerCase(), v]));
+}
+
+function verifyWebhookHmac(rawBuf, secret, sentB64) {
+  if (!secret || !sentB64) return false;
+  const digestB64 = crypto.createHmac("sha256", secret).update(rawBuf).digest("base64");
+  const a = Buffer.from(digestB64);
+  const b = Buffer.from(String(sentB64), "base64");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
 export const handler = async (event) => {
-  const SECRET = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET;
-  const topic  = event.headers["x-shopify-topic"];
-  const shop   = event.headers["x-shopify-shop-domain"];
-  const hmac   = event.headers["x-shopify-hmac-sha256"];
+  if (event.httpMethod !== "POST") {
+    return { statusCode: 405, body: "POST only" };
+  }
 
-  if (!verifyWebhook(event.body || "", hmac, SECRET)) {
+  const SECRET =
+    process.env.SHOPIFY_APP_SECRET_PUBLIC ||
+    process.env.SHOPIFY_APP_SECRET ||
+    "";
+  const DEACTIVATE = process.env.N8N_SHOP_DEACTIVATE_URL || "";
+  const FWD = process.env.FORWARD_SECRET || "";
+
+  if (!SECRET || !DEACTIVATE) {
+    return { statusCode: 500, body: "missing env" };
+  }
+
+  const headers = toLowerHeaders(event.headers);
+  const topic = (headers["x-shopify-topic"] || "").toLowerCase();
+  const shop = headers["x-shopify-shop-domain"] || "";
+  const sentHmac = headers["x-shopify-hmac-sha256"] || "";
+
+  // Use the RAW request body bytes exactly as sent
+  const raw = event.isBase64Encoded
+    ? Buffer.from(event.body || "", "base64")
+    : Buffer.from(event.body || "", "utf8");
+
+  if (!verifyWebhookHmac(raw, SECRET, sentHmac)) {
     return { statusCode: 401, body: "bad hmac" };
   }
 
-  // Tell n8n to deactivate & wipe the token
+  // ACK non-target topics but don't trigger deactivate
+  if (topic !== "app/uninstalled") {
+    return { statusCode: 200, body: "ok (ignored topic)" };
+  }
+
+  // Deactivate in your registry (non-blocking)
   try {
-    await fetch(process.env.N8N_SHOP_DEACTIVATE_URL, {
+    await fetch(DEACTIVATE, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || ""
+        "X-SEOBOSS-FORWARD-SECRET": FWD,
       },
-      body: JSON.stringify({ shop, topic })
+      body: JSON.stringify({
+        shop_url: shop,
+        topic,
+        uninstalled_at: new Date().toISOString(),
+      }),
     });
-  } catch {}
+  } catch (_) {
+    // swallow errors; we already ACKed Shopify
+  }
 
   return { statusCode: 200, body: "ok" };
 };
