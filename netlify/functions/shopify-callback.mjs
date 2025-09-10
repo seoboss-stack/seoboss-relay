@@ -13,7 +13,7 @@ function parseCookies(header = "") {
 export const handler = async (event) => {
   const API_KEY = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
   const SECRET  = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET || "";
-  const ONBOARD_URL = process.env.N8N_ONBOARD_SUBMIT_URL; // e.g. https://blogengine.ngrok.app/webhook/seoboss/api/onboarding/submit
+  const ONBOARD_URL = process.env.N8N_ONBOARD_SUBMIT_URL; 
 
   if (!API_KEY || !SECRET)  return { statusCode: 500, body: "missing API key/secret" };
   if (!ONBOARD_URL)         return { statusCode: 500, body: "missing N8N_ONBOARD_SUBMIT_URL" };
@@ -64,7 +64,7 @@ export const handler = async (event) => {
         client_name: "",
         contact_email: "",
         default_language: "en",
-        shop_input: shop,           // your sanitize node uses this
+        shop_input: shop,           
         admin_token: access_token,  // ...and this
         tone: "",
         niche: "",
