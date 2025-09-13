@@ -2,6 +2,7 @@
 import crypto from "node:crypto";
 import { logFnError } from "./log.mjs";
 
+// ---------- helpers ----------
 function parseCookies(header = "") {
   return Object.fromEntries(
     (header || "").split(/; */).filter(Boolean).map((c) => {
@@ -21,7 +22,6 @@ const normShop = (s = "") =>
 
 // Build your public base URL for webhook targets
 function publicBaseUrl(event) {
-  // Prefer explicit env var, else derive from proxy headers
   const env = process.env.PUBLIC_BASE_URL || process.env.APP_URL || "";
   if (env) return env.replace(/\/$/, "");
   const proto = event.headers?.["x-forwarded-proto"] || "https";
@@ -37,52 +37,60 @@ async function registerWebhooks({ shop, access_token, baseUrl }) {
     "X-Shopify-Access-Token": access_token,
   };
 
-  // Targets
-  const uninstalledAddress = `${baseUrl}/.netlify/functions/uninstalled`;
-  const gdprAddress       = `${baseUrl}/.netlify/functions/gdpr`;
+  const targets = [
+    { topic: "app/uninstalled",           address: `${baseUrl}/.netlify/functions/uninstalled` },
+    { topic: "customers/data_request",    address: `${baseUrl}/.netlify/functions/privacy` },
+    { topic: "customers/redact",          address: `${baseUrl}/.netlify/functions/privacy` },
+    { topic: "shop/redact",               address: `${baseUrl}/.netlify/functions/privacy` },
+  ];
 
-  // Helper: ensure topic exists pointing to address
-  async function ensure(topic, address) {
-    try {
-      // Check existing
-      const list = await fetch(`${apiBase}/webhooks.json`, { headers });
-      if (!list.ok) throw new Error(`list ${topic}: ${list.status} ${await list.text()}`);
-      const data = await list.json();
-      const exists = (data?.webhooks || []).some(w => (w.topic === topic && w.address === address));
-      if (exists) return true;
+  // Fetch existing once
+  const listRes = await fetch(`${apiBase}/webhooks.json`, { headers });
+  if (!listRes.ok) throw new Error(`list webhooks: ${listRes.status} ${await listRes.text()}`);
+  const existing = (await listRes.json())?.webhooks || [];
 
-      // Create
-      const create = await fetch(`${apiBase}/webhooks.json`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ webhook: { topic, address, format: "json" } }),
-      });
-      if (!create.ok) throw new Error(`create ${topic}: ${create.status} ${await create.text()}`);
-      return true;
-    } catch (e) {
-      // Let caller log; don't block install
-      throw e;
-    }
+  // Ensure each topic@address exists (idempotent)
+  for (const { topic, address } of targets) {
+    const already = existing.some(w => w.topic === topic && w.address === address);
+    if (already) continue;
+
+    const create = await fetch(`${apiBase}/webhooks.json`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ webhook: { topic, address, format: "json" } }),
+    });
+    if (!create.ok) throw new Error(`create ${topic}: ${create.status} ${await create.text()}`);
   }
-
-  await Promise.all([
-    ensure("app/uninstalled",           uninstalledAddress),
-    ensure("customers/data_request",    gdprAddress),
-    ensure("customers/redact",          gdprAddress),
-    ensure("shop/redact",               gdprAddress),
-  ]);
 }
 
+// Store token in Supabase vault via your Netlify helper
+async function storeTokenVault({ shop, access_token }) {
+  const url = `${process.env.PUBLIC_BASE_URL || process.env.APP_URL}/.netlify/functions/store-shop-token`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
+    },
+    body: JSON.stringify({ shop, token: access_token }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`store-shop-token failed: ${res.status} ${txt}`);
+  }
+}
+
+// ---------- handler ----------
 export const handler = async (event) => {
   const request_id = event.headers?.["x-nf-request-id"] || "";
   let shop = "";
 
   try {
-    const API_KEY   = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
-    const SECRET    = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET || "";
-    const ONBOARD_URL     = process.env.N8N_ONBOARD_SUBMIT_URL; // e.g. https://.../webhook/seoboss/api/onboarding/submit
-    const PUBLIC_HMAC_KEY = process.env.PUBLIC_HMAC_KEY || "";  // must match your n8n validator/shared secret
-    const FWD_SECRET      = process.env.FORWARD_SECRET || "";
+    const API_KEY        = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
+    const SECRET         = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET || "";
+    const ONBOARD_URL    = process.env.N8N_ONBOARD_SUBMIT_URL; // https://.../webhook/seoboss/api/onboarding/submit
+    const PUBLIC_HMAC_KEY= process.env.PUBLIC_HMAC_KEY || "";
+    const FWD_SECRET     = process.env.FORWARD_SECRET || "";
 
     if (!API_KEY || !SECRET)  return { statusCode: 500, body: "missing API key/secret" };
     if (!ONBOARD_URL)         return { statusCode: 500, body: "missing N8N_ONBOARD_SUBMIT_URL" };
@@ -123,7 +131,15 @@ export const handler = async (event) => {
     }
     const { access_token /*, scope */ } = await tokenRes.json();
 
-    // Register webhooks (don’t block install if it fails)
+    // Store token securely (don’t ship raw token to n8n)
+    try {
+      await storeTokenVault({ shop, access_token });
+    } catch (e) {
+      try { await logFnError({ fn: "shopify-callback/store-token", shop, status: 500, message: e?.message || String(e), request_id }); } catch {}
+      // non-blocking
+    }
+
+    // Register webhooks (non-blocking, log if fails)
     try {
       await registerWebhooks({
         shop,
@@ -131,21 +147,16 @@ export const handler = async (event) => {
         baseUrl: publicBaseUrl(event),
       });
     } catch (e) {
-      try {
-        await logFnError({
-          fn: "shopify-callback/register-webhooks",
-          shop, status: 500, message: e?.message || String(e), request_id,
-        });
-      } catch (_) {}
+      try { await logFnError({ fn: "shopify-callback/register-webhooks", shop, status: 500, message: e?.message || String(e), request_id }); } catch {}
+      // non-blocking
     }
 
-    // Hand off to YOUR onboarding flow (form-encoded, HMAC-signed)
+    // Hand off to your onboarding flow (form-encoded, HMAC-signed) WITHOUT token
     const bodyForm = new URLSearchParams({
       client_name: "",
       contact_email: "",
       default_language: "en",
       shop_input: shop,          // sanitize node expects this
-      admin_token: access_token, // shpat_...
       tone: "",
       niche: "",
       seed_keywords: "",
@@ -164,7 +175,6 @@ export const handler = async (event) => {
       headers["X-Seoboss-Hmac"] = sig;
     }
 
-    // Fire-and-forget to n8n
     try { await fetch(ONBOARD_URL, { method: "POST", headers, body: bodyForm }); } catch {}
 
     // Redirect to your connect page
