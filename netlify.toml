@@ -1,6 +1,15 @@
 [build]
   functions = "netlify/functions"
 
+[functions]
+  node_bundler = "esbuild"
+  # ensure the module is loaded from root node_modules at runtime
+  external_node_modules = ["@supabase/supabase-js"]
+
+# (optional but helpful)
+[build.environment]
+  NODE_VERSION = "20"
+
 # Enforce HTTPS & basic headers
 [[headers]]
   for = "/*"
