@@ -151,12 +151,14 @@ export const handler = async (event) => {
       // non-blocking
     }
 
-    // Hand off to your onboarding flow (form-encoded, HMAC-signed) WITHOUT token
+    // ---- TEMP: forward token to n8n so existing flows keep working ----
+    // (Later, remove admin_token here and have n8n call get-shop-token before Shopify calls.)
     const bodyForm = new URLSearchParams({
       client_name: "",
       contact_email: "",
       default_language: "en",
       shop_input: shop,          // sanitize node expects this
+      admin_token: access_token, // <— added back to unblock current n8n flow
       tone: "",
       niche: "",
       seed_keywords: "",
