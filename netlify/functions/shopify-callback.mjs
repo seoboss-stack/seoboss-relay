@@ -29,7 +29,7 @@ function publicBaseUrl(event) {
   return `${proto}://${host}`;
 }
 
-// Register app/uninstalled + GDPR webhooks to your Netlify functions
+// Register ONLY app/uninstalled via REST (GDPR is configured in Partner Dashboard)
 async function registerWebhooks({ shop, access_token, baseUrl }) {
   const apiBase = `https://${shop}/admin/api/2024-10`;
   const headers = {
@@ -38,10 +38,7 @@ async function registerWebhooks({ shop, access_token, baseUrl }) {
   };
 
   const targets = [
-    { topic: "app/uninstalled",           address: `${baseUrl}/.netlify/functions/uninstalled` },
-    { topic: "customers/data_request",    address: `${baseUrl}/.netlify/functions/privacy` },
-    { topic: "customers/redact",          address: `${baseUrl}/.netlify/functions/privacy` },
-    { topic: "shop/redact",               address: `${baseUrl}/.netlify/functions/privacy` },
+    { topic: "app/uninstalled", address: `${baseUrl}/.netlify/functions/uninstalled` },
   ];
 
   // Fetch existing once
@@ -139,7 +136,7 @@ export const handler = async (event) => {
       // non-blocking
     }
 
-    // Register webhooks (non-blocking, log if fails)
+    // Register app/uninstalled only (GDPR is set in Partner Dashboard)
     try {
       await registerWebhooks({
         shop,
@@ -151,14 +148,13 @@ export const handler = async (event) => {
       // non-blocking
     }
 
-    // ---- TEMP: forward token to n8n so existing flows keep working ----
-    // (Later, remove admin_token here and have n8n call get-shop-token before Shopify calls.)
+    // TEMP: forward token to n8n so existing flows keep working
     const bodyForm = new URLSearchParams({
       client_name: "",
       contact_email: "",
       default_language: "en",
       shop_input: shop,          // sanitize node expects this
-      admin_token: access_token, // <— added back to unblock current n8n flow
+      admin_token: access_token, // keep for now; later fetch from vault in n8n
       tone: "",
       niche: "",
       seed_keywords: "",
