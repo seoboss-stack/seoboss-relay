@@ -7,7 +7,7 @@ function parseCookies(header = "") {
   return Object.fromEntries(
     (header || "").split(/; */).filter(Boolean).map((c) => {
       const i = c.indexOf("="); if (i === -1) return [c, ""];
-      return [c.slice(0, i).trim(), decodeURIComponent(c.slice(i + 1))];
+      return [c.slice(0, i).trim(), decodeURIComponent(c.slice(1 + i))];
     })
   );
 }
@@ -41,16 +41,13 @@ async function registerWebhooks({ shop, access_token, baseUrl }) {
     { topic: "app/uninstalled", address: `${baseUrl}/.netlify/functions/uninstalled` },
   ];
 
-  // Fetch existing once
   const listRes = await fetch(`${apiBase}/webhooks.json`, { headers });
   if (!listRes.ok) throw new Error(`list webhooks: ${listRes.status} ${await listRes.text()}`);
   const existing = (await listRes.json())?.webhooks || [];
 
-  // Ensure each topic@address exists (idempotent)
   for (const { topic, address } of targets) {
     const already = existing.some(w => w.topic === topic && w.address === address);
     if (already) continue;
-
     const create = await fetch(`${apiBase}/webhooks.json`, {
       method: "POST",
       headers,
@@ -83,11 +80,11 @@ export const handler = async (event) => {
   let shop = "";
 
   try {
-    const API_KEY        = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
-    const SECRET         = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET || "";
-    const ONBOARD_URL    = process.env.N8N_ONBOARD_SUBMIT_URL; // https://.../webhook/seoboss/api/onboarding/submit
-    const PUBLIC_HMAC_KEY= process.env.PUBLIC_HMAC_KEY || "";
-    const FWD_SECRET     = process.env.FORWARD_SECRET || "";
+    const API_KEY         = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
+    const SECRET          = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET || "";
+    const ONBOARD_URL     = process.env.N8N_ONBOARD_SUBMIT_URL; // https://.../webhook/seoboss/api/onboarding/submit
+    const PUBLIC_HMAC_KEY = process.env.PUBLIC_HMAC_KEY || "";
+    const FWD_SECRET      = process.env.FORWARD_SECRET || "";
 
     if (!API_KEY || !SECRET)  return { statusCode: 500, body: "missing API key/secret" };
     if (!ONBOARD_URL)         return { statusCode: 500, body: "missing N8N_ONBOARD_SUBMIT_URL" };
@@ -108,8 +105,7 @@ export const handler = async (event) => {
     if (!ts || Math.abs(Date.now()/1000 - ts) > 600) return { statusCode: 401, body: "stale oauth" };
     if (!hmac || !code)                               return { statusCode: 400, body: "missing params" };
 
-    const message = Object.keys(q)
-      .filter(k => k !== "hmac" && k !== "signature")
+    const message = Object.keys(q).filter(k => k !== "hmac" && k !== "signature")
       .sort().map(k => `${k}=${q[k]}`).join("&");
     const digest = crypto.createHmac("sha256", SECRET).update(message).digest("hex");
     const safe = hmac.length === digest.length &&
@@ -129,26 +125,17 @@ export const handler = async (event) => {
     const { access_token /*, scope */ } = await tokenRes.json();
 
     // Store token securely (don’t ship raw token to n8n)
-    try {
-      await storeTokenVault({ shop, access_token });
-    } catch (e) {
-      try { await logFnError({ fn: "shopify-callback/store-token", shop, status: 500, message: e?.message || String(e), request_id }); } catch {}
-      // non-blocking
-    }
+    try { await storeTokenVault({ shop, access_token }); }
+    catch (e) { try { await logFnError({ fn: "shopify-callback/store-token", shop, status: 500, message: e?.message || String(e), request_id }); } catch {} }
 
     // Register app/uninstalled only (GDPR is set in Partner Dashboard)
     try {
-      await registerWebhooks({
-        shop,
-        access_token,
-        baseUrl: publicBaseUrl(event),
-      });
+      await registerWebhooks({ shop, access_token, baseUrl: publicBaseUrl(event) });
     } catch (e) {
       try { await logFnError({ fn: "shopify-callback/register-webhooks", shop, status: 500, message: e?.message || String(e), request_id }); } catch {}
-      // non-blocking
     }
 
-    // TEMP: forward token to n8n so existing flows keep working
+    // TEMP: forward token to n8n so existing flows keep working - and READ the JSON result
     const bodyForm = new URLSearchParams({
       client_name: "",
       contact_email: "",
@@ -173,13 +160,24 @@ export const handler = async (event) => {
       headers["X-Seoboss-Hmac"] = sig;
     }
 
-    try { await fetch(ONBOARD_URL, { method: "POST", headers, body: bodyForm }); } catch {}
+    let client_id = "";
+    try {
+      const onboardRes = await fetch(ONBOARD_URL, { method: "POST", headers, body: bodyForm });
+      // Even if not ok, we still redirect; we’ll just omit client_id in that case
+      try {
+        const data = await onboardRes.json().catch(() => ({}));
+        if (data && (data.client_id || data.clientId)) client_id = data.client_id || data.clientId;
+      } catch {}
+    } catch {}
 
-    // Redirect to your connect page
+    // Redirect to your connect page (now with client_id when available)
+    const qp = new URLSearchParams({ shop, installed: "1" });
+    if (client_id) qp.set("client_id", client_id);
+
     return {
       statusCode: 302,
       headers: {
-        Location: `https://seoboss.com/pages/connect?shop=${encodeURIComponent(shop)}&installed=1`,
+        Location: `https://seoboss.com/pages/connect?${qp.toString()}`,
         "Set-Cookie": "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
       },
       body: "",
@@ -205,3 +203,4 @@ export const handler = async (event) => {
     };
   }
 };
+
