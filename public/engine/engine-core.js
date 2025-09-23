@@ -337,17 +337,74 @@
     }
   });
 
-  // Hints
-  async function initHints(){
-    const input=$('#keywordInput'), hintBox=$('#hintContainer');
-    try{
-      const r=await Promise.race([fetch(CFG.endpoints.hints,{method:'GET'}), new Promise((_,rej)=>setTimeout(()=>rej(new Error('timeout')), 120000))]);
-      const d=await r.json(); const hints=d.hints||['best SEO strategies for 2025','how to get more Shopify traffic','is honey good for singers','energy drink blog ideas'];
-      let i=0; input.setAttribute('placeholder',hints[0]); hintIntervalId=setInterval(()=>{ input.setAttribute('placeholder',hints[i]); i=(i+1)%hints.length; }, 4000);
-      hintBox.innerHTML=hints.map(h=>`<div class='hint-option'>${h}</div>`).join(''); hintBox.querySelectorAll('.hint-option').forEach(el=>el.addEventListener('click',()=>{ input.value=el.textContent; input.focus(); }));
-    }catch{ input.setAttribute('placeholder','Enter your SEO keyword here…'); }
+  // ---- Hints (neutral fallback + flag) ----
+const HINTS = {
+  fallback: [
+    "how to choose a blog topic",
+    "product comparison: X vs Y",
+    "beginner’s guide to [your niche]",
+    "common mistakes with [product]",
+    "how to use [product] for [goal]",
+    "seasonal ideas for [audience]",
+  ],
+  rotateMs: 4000,
+};
+
+const FEATURE_FLAGS = { hintsEnabled: true };
+
+async function initHints(){
+  const input = $('#keywordInput'), hintBox = $('#hintContainer');
+
+  if (!FEATURE_FLAGS.hintsEnabled){
+    hintBox.innerHTML = "";
+    input.setAttribute('placeholder','Enter a keyword…');
+    return;
   }
-  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', initHints, { once: true }); else initHints();
+
+  let hints = [];
+  try {
+    const r = await Promise.race([
+      fetch(CONFIG.endpoints.hints, { method: 'GET' }),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), CONFIG.timeoutMs))
+    ]);
+    const d = await r.json().catch(() => ({}));
+    hints = Array.isArray(d) ? d : (Array.isArray(d.hints) ? d.hints : []);
+  } catch {}
+
+  if (!hints.length) hints = HINTS.fallback;
+
+  hintBox.innerHTML = hints
+    .slice(0, 12)
+    .map(h => `<div class="hint-option">${window.DOMPurify ? DOMPurify.sanitize(h) : h}</div>`)
+    .join('');
+
+  hintBox.querySelectorAll('.hint-option').forEach(el =>
+    el.addEventListener('click', () => { input.value = el.textContent; input.focus(); })
+  );
+
+  // rotate placeholder; reuse your global hintIntervalId so reset() can clear it
+  let i = 0;
+  const start = () => {
+    if (hintIntervalId) return;
+    input.setAttribute('placeholder', hints[0]);
+    hintIntervalId = setInterval(() => {
+      input.setAttribute('placeholder', hints[i % hints.length]);
+      i++;
+    }, HINTS.rotateMs);
+  };
+  const stop = () => { if (hintIntervalId) { clearInterval(hintIntervalId); hintIntervalId = null; } };
+
+  input.addEventListener('focus', stop);
+  input.addEventListener('blur', start);
+  start();
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initHints, { once: true });
+} else {
+  initHints();
+}
+
 
   // copy buttons
   document.addEventListener('click', (e)=>{
