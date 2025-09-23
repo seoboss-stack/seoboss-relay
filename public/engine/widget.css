@@ -1,0 +1,14 @@
+/* SEOBoss widget styles */
+.seoboss-placeholder .seoboss-card{
+  font: 500 14px/1.5 system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  color:#e8fff6; background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12); border-radius:12px;
+  padding:14px; max-width:680px; box-shadow:0 0 20px rgba(66,255,210,.15);
+}
+.seoboss-placeholder .title{ font-weight:800; margin-bottom:6px; color:#42ffd2 }
+.seoboss-placeholder .meta{ opacity:.9; margin-bottom:10px }
+.seoboss-placeholder .btn{
+  padding:.6rem .9rem; border-radius:10px; border:0; cursor:pointer;
+  background:linear-gradient(90deg,#42ffd2,#6aa8ff); color:#031b17; font-weight:800;
+}
+.seoboss-placeholder .result{ margin-top:8px; word-break:break-word; }
