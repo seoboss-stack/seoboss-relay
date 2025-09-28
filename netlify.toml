@@ -33,3 +33,9 @@
   to = "/.netlify/functions/engine-proxy/:splat"
   status = 200
   force = true
+
+[[redirects]]
+  from = "/apps/engine/keywords"
+  to   = "/.netlify/functions/keywords"
+  status = 200
+  force  = true
