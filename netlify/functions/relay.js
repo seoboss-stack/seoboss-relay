@@ -181,7 +181,7 @@ exports.handler = async (event) => {
       "application/x-www-form-urlencoded";
 
     const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), 25_000);
+    const t = setTimeout(() => controller.abort(), 60_000);
 
     const resp = await fetch(upstream, {
       method: "POST",
