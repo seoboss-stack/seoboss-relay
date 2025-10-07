@@ -1,5 +1,5 @@
-// /netlify/functions/start.mjs
-import { sb, json, CORS } from './_supabase.mjs';
+// netlify/functions/start.mjs
+import { sb, json, CORS } from '../shared/_supabase.mjs';
 import { randomUUID } from 'node:crypto';
 
 export default async (req) => {
@@ -22,6 +22,7 @@ export default async (req) => {
     u.pathname = '/.netlify/functions/done';
     const callback = `${u.toString()}?token=${encodeURIComponent(secret)}`;
 
+    // one-time inline debug so we can see webhook status from the response
     let n8nStatus = null, n8nText = null, n8nErr = null;
     try {
       const resp = await fetch(n8nUrl, {
@@ -38,13 +39,7 @@ export default async (req) => {
     return json({
       ok: true,
       jobId,
-      debug: {
-        n8nUrl,
-        n8nStatus,
-        n8nText,
-        n8nErr,
-        callback,
-      },
+      debug: { n8nUrl, n8nStatus, n8nText, n8nErr, callback },
     });
   } catch (e) {
     return json({ error: 'internal', detail: String(e) }, 500);
