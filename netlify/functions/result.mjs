@@ -1,16 +1,8 @@
-// netlify/functions/result.mjs
-import { sb, json, CORS } from '../shared/_supabase.mjs';
+import { sb, json, CORS } from './_lib/_supabase.mjs';
 
 export default async (req) => {
-  // CORS preflight
-  if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers: CORS });
-  }
-
-  // Only GET allowed
-  if (req.method !== 'GET') {
-    return json({ error: 'GET only' }, 405);
-  }
+  if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
+  if (req.method !== 'GET') return json({ error: 'GET only' }, 405);
 
   try {
     const { searchParams } = new URL(req.url);
@@ -18,12 +10,7 @@ export default async (req) => {
     if (!jobId) return json({ error: 'Missing jobId' }, 400);
 
     const supa = sb();
-    const { data, error } = await supa
-      .from('jobs')
-      .select('*')
-      .eq('job_id', jobId)
-      .single();
-
+    const { data, error } = await supa.from('jobs').select('*').eq('job_id', jobId).single();
     if (error || !data) return json({ error: 'Not found' }, 404);
 
     return json({
