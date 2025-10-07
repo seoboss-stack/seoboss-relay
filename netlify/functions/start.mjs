@@ -21,21 +21,24 @@ export default async (req) => {
     u.pathname = '/.netlify/functions/done';
     const callback = `${u.toString()}?token=${encodeURIComponent(process.env.FORWARD_SECRET || '')}`;
 
-    let n8nStatus = null, n8nText = null;
-    try {
-      const resp = await fetch(n8nUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jobId, input: body, callback_url: callback })
-      });
-      n8nStatus = resp.status;
-      n8nText = (await resp.text()).slice(0, 80);
-    } catch (e) {
-      n8nStatus = 'fetch-error';
-      n8nText = String(e);
-    }
+    // ---- debug logging WITHOUT changing the API response ----
+    console.log('[start]', jobId, '→', n8nUrl, 'cb:', callback);
 
-    return json({ ok: true, jobId, debug: { n8nUrl, n8nStatus, n8nText, callback } });
+    fetch(n8nUrl, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jobId, input: body, callback_url: callback })
+    })
+      .then(async (resp) => {
+        const text = await resp.text();
+        console.log('[start] n8n responded', jobId, resp.status, text.slice(0, 120));
+      })
+      .catch((e) => {
+        console.error('[start] n8n fetch error', jobId, e);
+      });
+
+    // return immediately (unchanged)
+    return json({ ok: true, jobId });
   } catch (e) {
     console.error('START error:', e);
     return json({ error: 'internal', detail: String(e) }, 500);
