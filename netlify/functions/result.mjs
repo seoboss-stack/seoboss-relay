@@ -1,4 +1,5 @@
-import { sb, json, CORS } from './_supabase.mjs';
+// netlify/functions/result.mjs
+import { sb, json, CORS } from '../shared/_supabase.mjs';
 
 export default async (req) => {
   // CORS preflight
@@ -30,7 +31,7 @@ export default async (req) => {
       status: data.status,
       result: data.result_json ?? null,
       error: data.error_text ?? null,
-      updatedAt: data.updated_at
+      updatedAt: data.updated_at,
     });
   } catch (e) {
     console.error('RESULT error:', e);
