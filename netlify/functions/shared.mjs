@@ -39,13 +39,22 @@ function safeEq(a,b){
   }catch{ return false; }
 }
 
-/* ───────────── GOOGLE SHEETS CLIENT ───────────── */
+/* ───────────── GOOGLE SHEETS CLIENT (split envs) ─────────────
+ * Uses GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY (with \n restored)
+ */
 export async function getSheetsClient() {
-  const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
-  if (!raw) throw new Error('Missing GOOGLE_SERVICE_ACCOUNT_JSON');
-  const creds = JSON.parse(raw);
+  const email = process.env.GOOGLE_CLIENT_EMAIL;
+  const pkRaw = process.env.GOOGLE_PRIVATE_KEY;
+  if (!email || !pkRaw) {
+    throw new Error('Missing GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY');
+  }
+  // Netlify env stores newlines escaped; restore them:
+  const privateKey = pkRaw.replace(/\\n/g, '\n');
+
   const jwt = new google.auth.JWT(
-    creds.client_email, null, creds.private_key,
+    email,
+    null,
+    privateKey,
     ['https://www.googleapis.com/auth/spreadsheets']
   );
   await jwt.authorize();
