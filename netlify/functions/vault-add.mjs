@@ -4,30 +4,39 @@ import { appendRowFromDict } from './sheets-dynamic.mjs';
 
 export default async (req, context) => {
   if (req.method === 'OPTIONS') return corsWrap(new Response('', { status: 204 }));
-  try{
+  try {
     const auth = verifyRequest(req);
     if (!auth.ok) return corsWrap(new Response(JSON.stringify({ error:'unauthorized', mode:auth.mode }), { status: 401 }));
 
     const { shop, client_id } = tenantFrom(req);
-    const body = await req.json();
+
+    let body = {};
+    try {
+      body = await req.json();
+    } catch {
+      // allow empty/malformed body; default to {}
+      body = {};
+    }
+
     const now = new Date().toISOString();
+    const clean = (v) => (v == null ? '' : String(v).trim());
 
     const row = {
-      vault_id: body.vault_id || (Math.random().toString(36).slice(2) + Date.now().toString(36)),
-      client_id,
-      shop_url: shop,
-      shop_client_id: body.shop_client_id || '',
-      title: body.title || '',
-      meta_title: body.meta_title || '',
-      meta_description: body.meta_description || '',
-      target_keywords: body.target_keywords || '',
-      category: body.category || '',
-      language: body.language || '',
-      status: (body.status || 'idea'),
+      vault_id: clean(body.vault_id) || (Math.random().toString(36).slice(2) + Date.now().toString(36)),
+      client_id: clean(client_id),
+      shop_url: clean(shop),
+      shop_client_id: clean(body.shop_client_id),
+      title: clean(body.title),
+      meta_title: clean(body.meta_title),
+      meta_description: clean(body.meta_description),
+      target_keywords: clean(body.target_keywords),
+      category: clean(body.category),
+      language: clean(body.language),
+      status: clean(body.status).toLowerCase() || 'idea',
       created_at: now,
       updated_at: now,
-      notes: body.notes || '',
-      idea_source: body.idea_source || 'generator'
+      notes: clean(body.notes),
+      idea_source: clean(body.idea_source) || 'generator'
     };
 
     const sheets = await getSheetsClient();
@@ -35,8 +44,10 @@ export default async (req, context) => {
     if (!sheetId) throw new Error('No sheet configured for this shop');
 
     await appendRowFromDict(sheets, sheetId, tab, row);
-    return corsWrap(new Response(JSON.stringify({ ok:true, row }), { status:200, headers:{'content-type':'application/json'} }));
-  }catch(err){
+    return corsWrap(new Response(JSON.stringify({ ok:true, row }), {
+      status:200, headers:{'content-type':'application/json'}
+    }));
+  } catch (err) {
     return corsWrap(new Response(JSON.stringify({ error: err.message || String(err) }), { status: 500 }));
   }
 };
