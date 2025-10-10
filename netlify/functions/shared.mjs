@@ -1,6 +1,7 @@
 // shared.mjs — dual-auth (App Proxy HMAC OR Forward Secret) + registry lookup keyed by shop_url
 import crypto from 'crypto';
 import { google } from 'googleapis';
+import { createClient } from '@supabase/supabase-js'; // <— NEW
 
 /* ───────────────── AUTH ───────────────── */
 export function verifyRequest(req){
@@ -39,22 +40,34 @@ function safeEq(a,b){
   }catch{ return false; }
 }
 
-/* ───────────── GOOGLE SHEETS CLIENT (split envs) ─────────────
- * Uses GOOGLE_CLIENT_EMAIL + GOOGLE_PRIVATE_KEY (with \n restored)
- */
-export async function getSheetsClient() {
-  const email = process.env.GOOGLE_CLIENT_EMAIL;
-  const pkRaw = process.env.GOOGLE_PRIVATE_KEY;
-  if (!email || !pkRaw) {
-    throw new Error('Missing GOOGLE_CLIENT_EMAIL / GOOGLE_PRIVATE_KEY');
-  }
-  // Netlify env stores newlines escaped; restore them:
-  const privateKey = pkRaw.replace(/\\n/g, '\n');
+/* ───────────── GOOGLE SHEETS CLIENT via Supabase secret ───────────── */
+let _cachedSA = null;
 
+async function getServiceAccountFromSupabase() {
+  if (_cachedSA) return _cachedSA;
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+  if (!supabaseUrl || !supabaseServiceKey) {
+    throw new Error('Missing SUPABASE_URL / SUPABASE_SERVICE_KEY');
+  }
+  const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
+  const { data, error } = await supabase
+    .from('private_secrets')
+    .select('value')
+    .eq('id', 'google_sa')
+    .single();
+  if (error) throw new Error(`Supabase secrets fetch failed: ${error.message}`);
+  if (!data || !data.value) throw new Error('Supabase secret google_sa not found');
+  _cachedSA = data.value; // { client_email, private_key, ... }
+  return _cachedSA;
+}
+
+export async function getSheetsClient() {
+  const creds = await getServiceAccountFromSupabase();
   const jwt = new google.auth.JWT(
-    email,
+    creds.client_email,
     null,
-    privateKey,
+    creds.private_key,
     ['https://www.googleapis.com/auth/spreadsheets']
   );
   await jwt.authorize();
@@ -62,11 +75,11 @@ export async function getSheetsClient() {
 }
 
 /* ───────────── REGISTRY LOOKUP (by shop_url) ─────────────
- * Required headers (case-insensitive):
+ * Registry columns (case-insensitive):
  *   - shop_url
- *   - one of: vault_sheet_id | sheet_id | sheet_url (URL okay; ID will be parsed)
+ *   - one of: vault_sheet_id | sheet_id | sheet_url
  * Optional:
- *   - vault_tab   (if absent, falls back to env VAULT_SHEET_TAB or 'Master Vault')
+ *   - vault_tab (we default to env VAULT_SHEET_TAB or 'Master Vault')
  */
 export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
   const registryId = process.env.REGISTRY_SHEET_ID;
@@ -75,13 +88,10 @@ export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
   const fallbackTab = process.env.VAULT_SHEET_TAB || 'Master Vault';
 
   if (!registryId){
-    if (!fallbackSheetId) {
-      throw new Error('No registry configured (REGISTRY_SHEET_ID) and no fallback (VAULT_SHEET_ID).');
-    }
+    if (!fallbackSheetId) throw new Error('No registry configured (REGISTRY_SHEET_ID) and no fallback (VAULT_SHEET_ID).');
     return { sheetId: fallbackSheetId, tab: fallbackTab, _source:'fallback' };
   }
 
-  // Read header + rows
   const { data } = await sheets.spreadsheets.values.get({
     spreadsheetId: registryId,
     range: `${registryTab}!A1:Z5000`
@@ -89,7 +99,6 @@ export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
   const rows = data.values || [];
   if (!rows.length) throw new Error(`Registry tab '${registryTab}' is empty`);
 
-  // Case-insensitive header map
   const header = rows[0].map(h => (h||'').trim());
   const lower = header.map(h => h.toLowerCase());
   const colIndex = (name) => lower.indexOf(name.toLowerCase());
@@ -106,16 +115,12 @@ export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
   const iTab  = colIndex('vault_tab');
 
   if (iShop < 0) throw new Error(`Registry tab '${registryTab}' missing column 'shop_url'`);
-  if (iId   < 0) throw new Error(
-    `Registry tab '${registryTab}' needs one of: 'vault_sheet_id' | 'sheet_id' | 'sheet_url'`
-  );
+  if (iId   < 0) throw new Error(`Registry tab '${registryTab}' needs one of: 'vault_sheet_id' | 'sheet_id' | 'sheet_url'`);
 
   const normShop = (s)=> String(s||'').replace(/^https?:\/\//,'').trim().toLowerCase();
   const wantShop = normShop(shopDomain);
 
-  // Prefer exact shop_url; fallback to client_id if provided
-  const bodyRows = rows.slice(1);
-  const match = bodyRows.find(r => {
+  const match = rows.slice(1).find(r => {
     const shop = normShop(r[iShop]);
     const cid  = iCid >= 0 ? String(r[iCid]||'').trim() : '';
     return (wantShop && shop === wantShop) || (!!clientId && cid === clientId);
@@ -126,7 +131,6 @@ export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
     throw new Error(`No registry row for shop '${wantShop}'`);
   }
 
-  // Sheet id: prefer explicit id, else parse from URL
   let sheetId = String(match[iId] || '').trim();
   if (sheetId.includes('/spreadsheets/d/')) {
     const m = sheetId.match(/\/spreadsheets\/d\/([^/]+)/i);
