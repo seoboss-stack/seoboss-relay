@@ -4,13 +4,19 @@ import { updateRowFieldsById } from './sheets-dynamic.mjs';
 
 export default async (req, context) => {
   if (req.method === 'OPTIONS') return corsWrap(new Response('', { status: 204 }));
-  try{
+  try {
     const auth = verifyRequest(req);
-    if (!auth.ok) return corsWrap(new Response(JSON.stringify({ error:'unauthorized', mode:auth.mode }), { status: 401 }));
+    if (!auth.ok) {
+      return corsWrap(new Response(JSON.stringify({ error:'unauthorized', mode:auth.mode }), { status: 401 }));
+    }
 
     const { shop, client_id } = tenantFrom(req);
-    const body = await req.json();
-    const { vault_id, updates } = body || {};
+
+    let body = {};
+    try { body = await req.json(); } catch { body = {}; }
+
+    const { vault_id } = body || {};
+    const updates = body?.updates || {};
     if (!vault_id) throw new Error('vault_id required');
 
     const sheets = await getSheetsClient();
@@ -18,10 +24,19 @@ export default async (req, context) => {
     if (!sheetId) throw new Error('No sheet configured for this shop');
 
     const now = new Date().toISOString();
-    await updateRowFieldsById(sheets, sheetId, tab, 'vault_id', String(vault_id), { ...updates, updated_at: now });
+    // Normalize updates to strings (helper is case-insensitive on keys)
+    const updatesNorm = {};
+    for (const [k,v] of Object.entries(updates)) {
+      updatesNorm[k] = v == null ? '' : String(v);
+    }
+    updatesNorm.updated_at = now;
 
-    return corsWrap(new Response(JSON.stringify({ ok:true }), { status:200, headers:{'content-type':'application/json'} }));
-  }catch(err){
+    await updateRowFieldsById(sheets, sheetId, tab, 'vault_id', String(vault_id), updatesNorm);
+
+    return corsWrap(new Response(JSON.stringify({ ok:true }), {
+      status:200, headers:{'content-type':'application/json'}
+    }));
+  } catch (err) {
     return corsWrap(new Response(JSON.stringify({ error: err.message || String(err) }), { status: 500 }));
   }
 };
