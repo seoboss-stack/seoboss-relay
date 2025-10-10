@@ -2,19 +2,20 @@
 import crypto from 'crypto';
 import { google } from 'googleapis';
 
+/* ───────────────── AUTH ───────────────── */
 export function verifyRequest(req){
   const url = new URL(req.url);
   const params = url.searchParams;
   const forwardSecret = process.env.FORWARD_SECRET || process.env.X_SEOBOSS_FORWARD_SECRET;
   const appSecret = process.env.SHOPIFY_APP_SECRET;
 
-  // Mode A: Forward Secret header (good when calling via n8n or Netlify proxy)
+  // A) Forward secret header
   const hdrSecret = req.headers.get('x-seoboss-forward-secret');
   if (forwardSecret && hdrSecret && safeEq(forwardSecret, hdrSecret)){
     return { ok:true, mode:'forward-secret' };
   }
 
-  // Mode B: Shopify App Proxy HMAC
+  // B) Shopify App Proxy HMAC (?signature=...)
   if (appSecret && params.get('signature')){
     const sig = params.get('signature');
     params.delete('signature');
@@ -27,7 +28,7 @@ export function verifyRequest(req){
     return { ok, mode:'app-proxy' };
   }
 
-  // Dev fallback: allow if neither secret is set (local dev)
+  // Dev fallback
   const devOk = !forwardSecret && !appSecret;
   return { ok: devOk, mode: devOk ? 'dev' : 'unauthorized' };
 }
@@ -38,6 +39,7 @@ function safeEq(a,b){
   }catch{ return false; }
 }
 
+/* ───────────── GOOGLE SHEETS CLIENT ───────────── */
 export async function getSheetsClient() {
   const raw = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!raw) throw new Error('Missing GOOGLE_SERVICE_ACCOUNT_JSON');
@@ -50,49 +52,95 @@ export async function getSheetsClient() {
   return google.sheets({ version: 'v4', auth: jwt });
 }
 
+/* ───────────── REGISTRY LOOKUP (by shop_url) ─────────────
+ * Required headers (case-insensitive):
+ *   - shop_url
+ *   - one of: vault_sheet_id | sheet_id | sheet_url (URL okay; ID will be parsed)
+ * Optional:
+ *   - vault_tab   (if absent, falls back to env VAULT_SHEET_TAB or 'Master Vault')
+ */
 export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
-  // Registry env
   const registryId = process.env.REGISTRY_SHEET_ID;
   const registryTab = process.env.REGISTRY_SHEET_TAB || 'clients';
-  const fallbackSheetId = process.env.VAULT_SHEET_ID;
-  const fallbackTab = process.env.VAULT_SHEET_TAB || 'content_vault';
+  const fallbackSheetId = process.env.VAULT_SHEET_ID || '';
+  const fallbackTab = process.env.VAULT_SHEET_TAB || 'Master Vault';
 
   if (!registryId){
-    return { sheetId: fallbackSheetId, tab: fallbackTab };
+    if (!fallbackSheetId) {
+      throw new Error('No registry configured (REGISTRY_SHEET_ID) and no fallback (VAULT_SHEET_ID).');
+    }
+    return { sheetId: fallbackSheetId, tab: fallbackTab, _source:'fallback' };
   }
+
+  // Read header + rows
   const { data } = await sheets.spreadsheets.values.get({
     spreadsheetId: registryId,
     range: `${registryTab}!A1:Z5000`
   });
   const rows = data.values || [];
-  const header = rows[0] || [];
-  const idx = (name)=> header.findIndex(h => (h||'').trim() === name);
-  const iShop = idx('shop_url');
-  const iClient = idx('client_id');
-  const iSheet = (idx('vault_sheet_id')>=0? idx('vault_sheet_id'): idx('sheet_id'));
-  const iTab = idx('vault_tab');
+  if (!rows.length) throw new Error(`Registry tab '${registryTab}' is empty`);
 
-  // Prefer shop_url strict match (no https)
-  const norm = (s)=> String(s||'').replace(/^https?:\/\//,'').trim().toLowerCase();
-  const match = rows.slice(1).find(r => {
-    const shop = norm(r[iShop]);
-    const cid = (r[iClient]||'').trim();
-    return (shop && shop === norm(shopDomain)) || (clientId && cid === clientId);
+  // Case-insensitive header map
+  const header = rows[0].map(h => (h||'').trim());
+  const lower = header.map(h => h.toLowerCase());
+  const colIndex = (name) => lower.indexOf(name.toLowerCase());
+
+  const iShop = colIndex('shop_url');
+  const iCid  = colIndex('client_id');
+  const iId   = (() => {
+    const a = colIndex('vault_sheet_id');
+    if (a >= 0) return a;
+    const b = colIndex('sheet_id');
+    if (b >= 0) return b;
+    return colIndex('sheet_url'); // accept full URL
+  })();
+  const iTab  = colIndex('vault_tab');
+
+  if (iShop < 0) throw new Error(`Registry tab '${registryTab}' missing column 'shop_url'`);
+  if (iId   < 0) throw new Error(
+    `Registry tab '${registryTab}' needs one of: 'vault_sheet_id' | 'sheet_id' | 'sheet_url'`
+  );
+
+  const normShop = (s)=> String(s||'').replace(/^https?:\/\//,'').trim().toLowerCase();
+  const wantShop = normShop(shopDomain);
+
+  // Prefer exact shop_url; fallback to client_id if provided
+  const bodyRows = rows.slice(1);
+  const match = bodyRows.find(r => {
+    const shop = normShop(r[iShop]);
+    const cid  = iCid >= 0 ? String(r[iCid]||'').trim() : '';
+    return (wantShop && shop === wantShop) || (!!clientId && cid === clientId);
   });
 
-  if (!match) return { sheetId: fallbackSheetId, tab: fallbackTab };
+  if (!match) {
+    if (fallbackSheetId) return { sheetId: fallbackSheetId, tab: fallbackTab, _source:'fallback-no-row' };
+    throw new Error(`No registry row for shop '${wantShop}'`);
+  }
 
-  const sheetId = (match[iSheet]||'').trim() || fallbackSheetId;
-  const tab = (match[iTab]||'').trim() || fallbackTab;
-  return { sheetId, tab };
+  // Sheet id: prefer explicit id, else parse from URL
+  let sheetId = String(match[iId] || '').trim();
+  if (sheetId.includes('/spreadsheets/d/')) {
+    const m = sheetId.match(/\/spreadsheets\/d\/([^/]+)/i);
+    sheetId = m ? m[1] : '';
+  }
+  if (!sheetId) throw new Error(`Registry row for '${wantShop}' has empty sheet id/url`);
+
+  const tab = (iTab >= 0 ? String(match[iTab]||'').trim() : '') || fallbackTab;
+
+  if (process.env.DEBUG_REGISTRY === '1') {
+    console.log(JSON.stringify({ debug_registry_resolved: { sheetId, tab } }));
+  }
+  return { sheetId, tab, _source:'registry' };
 }
 
+/* ───────────── REQUEST CONTEXT HELPERS ───────────── */
 export function tenantFrom(req){
-  const shop = req.headers.get('x-shop') 
+  const url = new URL(req.url);
+  const shop = req.headers.get('x-shop')
            || req.headers.get('x-shopify-shop-domain')
-           || new URL(req.url).searchParams.get('shop') 
+           || url.searchParams.get('shop')
            || '';
-  const client_id = new URL(req.url).searchParams.get('client_id') || '';
+  const client_id = url.searchParams.get('client_id') || '';
   return { shop, client_id };
 }
 
