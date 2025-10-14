@@ -3,7 +3,9 @@ import { verifyRequest, getSheetsClient, lookupClientSheetByShop, corsWrap, tena
 import { updateRowFieldsById } from './sheets-dynamic.mjs';
 
 export default async (req, context) => {
-  if (req.method === 'OPTIONS') return corsWrap(new Response('', { status: 204 }));
+  // ✅ Proper 204 for preflight
+  if (req.method === 'OPTIONS') return corsWrap({ status: 204 });
+
   try {
     const auth = verifyRequest(req);
     if (!auth.ok) {
@@ -24,7 +26,6 @@ export default async (req, context) => {
     if (!sheetId) throw new Error('No sheet configured for this shop');
 
     const now = new Date().toISOString();
-    // Normalize updates to strings (helper is case-insensitive on keys)
     const updatesNorm = {};
     for (const [k,v] of Object.entries(updates)) {
       updatesNorm[k] = v == null ? '' : String(v);
