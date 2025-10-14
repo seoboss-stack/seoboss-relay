@@ -123,6 +123,7 @@ export const handler = async (event) => {
   if (suffix === "/v3/vault/list")   return await forwardToFunction("vault-list");
   if (suffix === "/v3/vault/add")    return await forwardToFunction("vault-add");
   if (suffix === "/v3/vault/update") return await forwardToFunction("vault-update");
+  if (suffix === "/v3/vault/delete") return await forwardToFunction("vault-delete");
   /* ──────────────────────────────────────────────────────────── */
 
   // 2) everything else → forward to n8n
