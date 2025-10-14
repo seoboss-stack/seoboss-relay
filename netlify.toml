@@ -45,6 +45,13 @@
   status = 200
   force = true
 
+# Vault endpoints (App Proxy → Functions)
+[[redirects]]
+  from = "/apps/engine/v3/vault/delete"
+  to   = "/.netlify/functions/vault-delete"
+  status = 200
+  force = true
+
 
 # App Proxy → Engine Proxy function
 [[redirects]]
@@ -71,6 +78,13 @@
 [[redirects]]
   from = "/v3/vault/update"
   to = "/.netlify/functions/vault-update"
+  status = 200
+  force = true
+
+# (Optional convenience if you ever hit them directly)
+[[redirects]]
+  from = "/v3/vault/delete"
+  to   = "/.netlify/functions/vault-delete"
   status = 200
   force = true
 
