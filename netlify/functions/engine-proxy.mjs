@@ -1,7 +1,7 @@
 // netlify/functions/engine-proxy.mjs
 import crypto from "node:crypto";
 
-const ORIGIN = "https://seoboss.com"; // CORS for your UI
+const ORIGIN = "https://seoboss.com"; // CORS for n8n-forwarded routes
 
 function json(status, data) {
   return {
@@ -22,7 +22,7 @@ function getSuffix(url) {
   return p || "/";
 }
 
-// Build message per Shopify App Proxy rule
+// Build message per Shopify App Proxy rule (exclude signature, sort keys, join dupes)
 function makeProxyMessage(url) {
   const map = {};
   for (const [k, v] of url.searchParams.entries()) {
@@ -59,7 +59,7 @@ export const handler = async (event) => {
     return json(200, { ok: true, service: "engine-proxy", t: Date.now() });
   }
 
-  // 1) verify App Proxy signature (public or private app secret)
+  // 1) verify App Proxy signature (support public/private app secrets)
   const secrets = [
     process.env.SHOPIFY_APP_SECRET || "",
     process.env.SHOPIFY_APP_SECRET_PUBLIC || "",
@@ -69,14 +69,13 @@ export const handler = async (event) => {
 
   /* ─────────────────────────────────────────────────────────────
      VAULT INTERCEPTOR (failsafe):
-     If the path is /v3/vault/*, forward internally to your vault
-     Netlify functions instead of n8n.
-     This works regardless of whether Shopify forwards via /proxy
-     or root—because engine-proxy sits on /proxy/*.
+     /v3/vault/* → forward internally to Netlify functions
+     Adds X-SEOBOSS-FORWARD-SECRET and passes shop/client headers.
+     Works whether Shopify forwards via /proxy or root.
      ───────────────────────────────────────────────────────────── */
   const forwardToFunction = async (fnName) => {
     const qs = new URLSearchParams(url.searchParams); // keep shop, logged_in_customer_id, etc.
-    // Keep signature in the query; your vault functions know how to verify it.
+    // Build target to the local function
     const host = event.headers["x-forwarded-host"] || event.headers.host;
     const scheme = event.headers["x-forwarded-proto"] || "https";
     const target = `${scheme}://${host}/.netlify/functions/${fnName}${qs.size ? `?${qs}` : ""}`;
@@ -87,6 +86,10 @@ export const handler = async (event) => {
       ? Buffer.from(event.body || "", "base64").toString("utf8")
       : (event.body || "");
 
+    // Pull tenant hints from query (and pass through as headers, too)
+    const shopFromQs = url.searchParams.get("shop") || "";
+    const clientIdFromQs = url.searchParams.get("client_id") || "";
+
     const resp = await fetch(target, {
       method,
       headers: {
@@ -94,6 +97,11 @@ export const handler = async (event) => {
           event.headers?.["content-type"] ||
           event.headers?.["Content-Type"] ||
           "application/json",
+        // server-side trust: let vault-* functions auth via forward-secret
+        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
+        // also pass tenant hints as headers (tenantFrom() reads these)
+        "x-shop": shopFromQs || event.headers["x-shop"] || "",
+        "x-client-id": clientIdFromQs || event.headers["x-client-id"] || "",
       },
       body: needsBody ? rawBody : undefined,
     });
@@ -103,7 +111,7 @@ export const handler = async (event) => {
       statusCode: resp.status,
       headers: {
         "Content-Type": resp.headers.get("content-type") || "application/json",
-        // match your vault functions' permissive CORS so the shop UI is happy
+        // match vault functions' permissive CORS (Shopify App Proxy will consume it)
         "Access-Control-Allow-Origin": "*",
         "Access-Control-Expose-Headers": "Content-Type",
       },
@@ -153,8 +161,4 @@ export const handler = async (event) => {
     headers: {
       "Content-Type": resp.headers.get("content-type") || "application/json",
       "Access-Control-Allow-Origin": ORIGIN,
-      "Access-Control-Expose-Headers": "Content-Type",
-    },
-    body: text,
-  };
-};
+      "Access-Control-Expose-Header
