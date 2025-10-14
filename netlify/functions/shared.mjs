@@ -1,26 +1,46 @@
 // shared.mjs — dual-auth (App Proxy HMAC OR Forward Secret) + registry lookup keyed by shop_url
 import crypto from 'crypto';
 import { google } from 'googleapis';
-import { createClient } from '@supabase/supabase-js'; // <— NEW
+import { createClient } from '@supabase/supabase-js';
 
-/* ───────────────── AUTH ───────────────── */
+/* ───────────── helpers ───────────── */
+function A1(tab, range){
+  const safe = String(tab).replace(/'/g, "''");
+  return `'${safe}'!${range}`;
+}
+function normShopDomain(s){
+  return String(s || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+}
+function safeEq(a,b){
+  const A = Buffer.from(String(a||''), 'utf8');
+  const B = Buffer.from(String(b||''), 'utf8');
+  if (A.length !== B.length) return false;
+  try { return crypto.timingSafeEqual(A,B); } catch { return false; }
+}
+
+/* ───────────── AUTH ───────────── */
 export function verifyRequest(req){
   const url = new URL(req.url);
   const params = url.searchParams;
   const forwardSecret = process.env.FORWARD_SECRET || process.env.X_SEOBOSS_FORWARD_SECRET;
   const appSecret = process.env.SHOPIFY_APP_SECRET;
 
-  // A) Forward secret header
+  // A) Forward-secret header
   const hdrSecret = req.headers.get('x-seoboss-forward-secret');
   if (forwardSecret && hdrSecret && safeEq(forwardSecret, hdrSecret)){
     return { ok:true, mode:'forward-secret' };
   }
 
   // B) Shopify App Proxy HMAC (?signature=...)
-  if (appSecret && params.get('signature')){
-    const sig = params.get('signature');
-    params.delete('signature');
-    const ordered = Array.from(params.entries())
+  const sig = params.get('signature');
+  if (appSecret && sig){
+    const paramsNoSig = new URLSearchParams(params);
+    paramsNoSig.delete('signature');
+    const ordered = Array.from(paramsNoSig.entries())
       .sort(([a],[b])=>a.localeCompare(b))
       .map(([k,v])=>`${k}=${v}`)
       .join('');
@@ -34,13 +54,7 @@ export function verifyRequest(req){
   return { ok: devOk, mode: devOk ? 'dev' : 'unauthorized' };
 }
 
-function safeEq(a,b){
-  try{
-    return crypto.timingSafeEqual(Buffer.from(String(a), 'utf8'), Buffer.from(String(b), 'utf8'));
-  }catch{ return false; }
-}
-
-/* ───────────── GOOGLE SHEETS CLIENT via Supabase secret ───────────── */
+/* ───────────── Google Sheets client via Supabase-stored SA ───────────── */
 let _cachedSA = null;
 
 async function getServiceAccountFromSupabase() {
@@ -52,13 +66,17 @@ async function getServiceAccountFromSupabase() {
   }
   const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
   const { data, error } = await supabase
-    .from('private_secrets')
+    .from('private_secrets') // server-only table; stores JSON values
     .select('value')
     .eq('id', 'google_sa')
     .single();
+
   if (error) throw new Error(`Supabase secrets fetch failed: ${error.message}`);
   if (!data || !data.value) throw new Error('Supabase secret google_sa not found');
-  _cachedSA = data.value; // { client_email, private_key, ... }
+
+  const val = (typeof data.value === 'string') ? JSON.parse(data.value) : data.value;
+  if (!val.client_email || !val.private_key) throw new Error('google_sa missing client_email or private_key');
+  _cachedSA = val;
   return _cachedSA;
 }
 
@@ -74,33 +92,34 @@ export async function getSheetsClient() {
   return google.sheets({ version: 'v4', auth: jwt });
 }
 
-/* ───────────── REGISTRY LOOKUP (by shop_url) ─────────────
- * Registry columns (case-insensitive):
- *   - shop_url
- *   - one of: vault_sheet_id | sheet_id | sheet_url
- * Optional:
- *   - vault_tab (we default to env VAULT_SHEET_TAB or 'Master Vault')
- */
+/* ───────────── Registry lookup (by shop_url OR client_id) ───────────── */
+let _regCache = null;
+
 export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
-  const registryId = process.env.REGISTRY_SHEET_ID;
-  const registryTab = process.env.REGISTRY_SHEET_TAB || 'clients';
-  const fallbackSheetId = process.env.VAULT_SHEET_ID || '';
-  const fallbackTab = process.env.VAULT_SHEET_TAB || 'Master Vault';
+  const registryId     = process.env.REGISTRY_SHEET_ID;
+  const registryTab    = process.env.REGISTRY_SHEET_TAB || 'clients';
+  const fallbackSheetId= process.env.VAULT_SHEET_ID || '';
+  const fallbackTab    = process.env.VAULT_SHEET_TAB || 'Master Vault';
 
   if (!registryId){
     if (!fallbackSheetId) throw new Error('No registry configured (REGISTRY_SHEET_ID) and no fallback (VAULT_SHEET_ID).');
     return { sheetId: fallbackSheetId, tab: fallbackTab, _source:'fallback' };
   }
 
-  const { data } = await sheets.spreadsheets.values.get({
-    spreadsheetId: registryId,
-    range: `${registryTab}!A1:Z5000`
-  });
-  const rows = data.values || [];
+  const now = Date.now();
+  if (!_regCache || (now - (_regCache.t||0)) > 60_000) {
+    const { data } = await sheets.spreadsheets.values.get({
+      spreadsheetId: registryId,
+      range: A1(registryTab, 'A1:Z5000'),
+      valueRenderOption: 'UNFORMATTED_VALUE'
+    });
+    _regCache = { t: now, rows: (data.values || []) };
+  }
+  const rows = _regCache.rows;
   if (!rows.length) throw new Error(`Registry tab '${registryTab}' is empty`);
 
   const header = rows[0].map(h => (h||'').trim());
-  const lower = header.map(h => h.toLowerCase());
+  const lower  = header.map(h => h.toLowerCase());
   const colIndex = (name) => lower.indexOf(name.toLowerCase());
 
   const iShop = colIndex('shop_url');
@@ -110,18 +129,17 @@ export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
     if (a >= 0) return a;
     const b = colIndex('sheet_id');
     if (b >= 0) return b;
-    return colIndex('sheet_url'); // accept full URL
+    return colIndex('sheet_url');
   })();
   const iTab  = colIndex('vault_tab');
 
   if (iShop < 0) throw new Error(`Registry tab '${registryTab}' missing column 'shop_url'`);
   if (iId   < 0) throw new Error(`Registry tab '${registryTab}' needs one of: 'vault_sheet_id' | 'sheet_id' | 'sheet_url'`);
 
-  const normShop = (s)=> String(s||'').replace(/^https?:\/\//,'').trim().toLowerCase();
-  const wantShop = normShop(shopDomain);
+  const wantShop = normShopDomain(shopDomain);
 
   const match = rows.slice(1).find(r => {
-    const shop = normShop(r[iShop]);
+    const shop = normShopDomain(r[iShop]);
     const cid  = iCid >= 0 ? String(r[iCid]||'').trim() : '';
     return (wantShop && shop === wantShop) || (!!clientId && cid === clientId);
   });
@@ -141,19 +159,22 @@ export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
   const tab = (iTab >= 0 ? String(match[iTab]||'').trim() : '') || fallbackTab;
 
   if (process.env.DEBUG_REGISTRY === '1') {
-    console.log(JSON.stringify({ debug_registry_resolved: { sheetId, tab } }));
+    console.log(JSON.stringify({ debug_registry_resolved: { sheetId, tab, shop: wantShop } }));
   }
   return { sheetId, tab, _source:'registry' };
 }
 
-/* ───────────── REQUEST CONTEXT HELPERS ───────────── */
+/* ───────────── Request context + CORS ───────────── */
 export function tenantFrom(req){
   const url = new URL(req.url);
-  const shop = req.headers.get('x-shop')
-           || req.headers.get('x-shopify-shop-domain')
-           || url.searchParams.get('shop')
-           || '';
-  const client_id = url.searchParams.get('client_id') || '';
+  const hdrShop = req.headers.get('x-shop') || req.headers.get('x-shopify-shop-domain') || '';
+  const qsShop  = url.searchParams.get('shop') || '';
+  const shop    = normShopDomain(hdrShop || qsShop);
+
+  const hdrClient = req.headers.get('x-client-id') || '';
+  const qsClient  = url.searchParams.get('client_id') || '';
+  const client_id = String(hdrClient || qsClient).trim();
+
   return { shop, client_id };
 }
 
@@ -161,9 +182,27 @@ export function corsWrap(res){
   const corsHeaders = {
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'OPTIONS, GET, POST',
-    'access-control-allow-headers': 'content-type, x-seoboss-forward-secret, x-shop'
+    'access-control-allow-headers': 'content-type, x-seoboss-forward-secret, x-shop, x-client-id'
   };
-  const headers = new Headers(res.headers || {});
-  Object.entries(corsHeaders).forEach(([k,v])=> headers.set(k,v));
-  return new Response(res.body, { ...res, headers });
+
+  // Response instance passed?
+  if (res instanceof Response) {
+    const headers = new Headers(res.headers);
+    Object.entries(corsHeaders).forEach(([k,v]) => headers.set(k, v));
+    return new Response(res.body, {
+      status: res.status,
+      statusText: res.statusText,
+      headers
+    });
+  }
+
+  // Init-style object
+  const headers = new Headers(res?.headers || {});
+  Object.entries(corsHeaders).forEach(([k,v]) => headers.set(k, v));
+
+  // For 204, body must be null/undefined
+  const status = res?.status ?? 200;
+  const body = status === 204 ? null : (res?.body ?? '');
+
+  return new Response(body, { status, headers });
 }
