@@ -26,6 +26,26 @@
   status = 200
   force = true
 
+# Vault → Functions (bypass engine-proxy/n8n)
+[[redirects]]
+  from = "/proxy/v3/vault/list"
+  to   = "/.netlify/functions/vault-list"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/proxy/v3/vault/add"
+  to   = "/.netlify/functions/vault-add"
+  status = 200
+  force  = true
+
+[[redirects]]
+  from = "/proxy/v3/vault/update"
+  to   = "/.netlify/functions/vault-update"
+  status = 200
+  force  = true
+
+
 # App Proxy → Engine Proxy function
 [[redirects]]
   from = "/proxy/*"
