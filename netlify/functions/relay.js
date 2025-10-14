@@ -31,8 +31,7 @@ const ROUTE_MAP = {
   "/seoboss/api/blog-post":            "N8N_POST_URL",
   "/seoboss/api/trending-questions":   "N8N_TRENDING_QS_URL",
   "/seoboss/api/trending-searches":    "N8N_TRENDING_SEARCHES_URL",
-  "/seoboss/api/vault-add":            "N8N_VAULT_ADD_URL",
-  "/seoboss/api/vault-load":           "N8N_VAULT_LOAD_URL",
+  
 
   // Onboarding
   "/seoboss/api/onboarding/submit":    "N8N_ONBOARD_SUBMIT_URL",
