@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { google } from 'googleapis';
 import { createClient } from '@supabase/supabase-js';
 
-/* ───────────── helpers ───────────── */
+/* ───────────── small helpers ───────────── */
 function A1(tab, range){
   const safe = String(tab).replace(/'/g, "''");
   return `'${safe}'!${range}`;
@@ -22,14 +22,31 @@ function safeEq(a,b){
   try { return crypto.timingSafeEqual(A,B); } catch { return false; }
 }
 
-/* ───────────── AUTH ───────────── */
+/* ───────────── AUTH ─────────────
+   Supports two auth modes:
+   1) Forward-secret header (from engine-proxy): X-SEOBOSS-FORWARD-SECRET
+   2) Shopify App Proxy HMAC (?signature=...) with exact message construction:
+      - exclude "signature"
+      - group duplicate keys (join with commas)
+      - sort keys
+      - concatenate k=v with NO separators
+*/
 export function verifyRequest(req){
   const url = new URL(req.url);
   const params = url.searchParams;
-  const forwardSecret = process.env.FORWARD_SECRET || process.env.X_SEOBOSS_FORWARD_SECRET;
-  const appSecret = process.env.SHOPIFY_APP_SECRET;
 
-  // A) Forward-secret header
+  // Accept either private or public secret (some apps use *_PUBLIC for proxies)
+  const appSecret =
+    process.env.SHOPIFY_APP_SECRET ||
+    process.env.SHOPIFY_APP_SECRET_PUBLIC ||
+    '';
+
+  const forwardSecret =
+    process.env.FORWARD_SECRET ||
+    process.env.X_SEOBOSS_FORWARD_SECRET ||
+    '';
+
+  // A) Forward-secret header (trusted by engine-proxy)
   const hdrSecret = req.headers.get('x-seoboss-forward-secret');
   if (forwardSecret && hdrSecret && safeEq(forwardSecret, hdrSecret)){
     return { ok:true, mode:'forward-secret' };
@@ -38,23 +55,28 @@ export function verifyRequest(req){
   // B) Shopify App Proxy HMAC (?signature=...)
   const sig = params.get('signature');
   if (appSecret && sig){
-    const paramsNoSig = new URLSearchParams(params);
-    paramsNoSig.delete('signature');
-    const ordered = Array.from(paramsNoSig.entries())
-      .sort(([a],[b])=>a.localeCompare(b))
-      .map(([k,v])=>`${k}=${v}`)
+    // Build message exactly as Shopify expects (group dupes, sort keys)
+    const map = {};
+    for (const [k, v] of params.entries()) {
+      if (k === 'signature') continue;
+      (map[k] ||= []).push(v);
+    }
+    const message = Object.keys(map)
+      .sort()
+      .map(k => `${k}=${map[k].join(',')}`)
       .join('');
-    const digest = crypto.createHmac('sha256', appSecret).update(ordered).digest('hex');
+
+    const digest = crypto.createHmac('sha256', appSecret).update(message, 'utf8').digest('hex');
     const ok = safeEq(digest, sig);
     return { ok, mode:'app-proxy' };
   }
 
-  // Dev fallback
+  // Dev fallback only when no secrets are configured at all
   const devOk = !forwardSecret && !appSecret;
   return { ok: devOk, mode: devOk ? 'dev' : 'unauthorized' };
 }
 
-/* ───────────── Google Sheets client via Supabase-stored SA ───────────── */
+/* ───────────── Google Sheets via Supabase-stored SA ───────────── */
 let _cachedSA = null;
 
 async function getServiceAccountFromSupabase() {
@@ -66,7 +88,7 @@ async function getServiceAccountFromSupabase() {
   }
   const supabase = createClient(supabaseUrl, supabaseServiceKey, { auth: { persistSession: false } });
   const { data, error } = await supabase
-    .from('private_secrets') // server-only table; stores JSON values
+    .from('private_secrets') // server-only table; value may be JSON string or object
     .select('value')
     .eq('id', 'google_sa')
     .single();
@@ -96,10 +118,10 @@ export async function getSheetsClient() {
 let _regCache = null;
 
 export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
-  const registryId     = process.env.REGISTRY_SHEET_ID;
-  const registryTab    = process.env.REGISTRY_SHEET_TAB || 'clients';
-  const fallbackSheetId= process.env.VAULT_SHEET_ID || '';
-  const fallbackTab    = process.env.VAULT_SHEET_TAB || 'Master Vault';
+  const registryId      = process.env.REGISTRY_SHEET_ID;
+  const registryTab     = process.env.REGISTRY_SHEET_TAB || 'clients';
+  const fallbackSheetId = process.env.VAULT_SHEET_ID || '';
+  const fallbackTab     = process.env.VAULT_SHEET_TAB || 'Master Vault';
 
   if (!registryId){
     if (!fallbackSheetId) throw new Error('No registry configured (REGISTRY_SHEET_ID) and no fallback (VAULT_SHEET_ID).');
@@ -167,6 +189,8 @@ export async function lookupClientSheetByShop({ sheets, shopDomain, clientId }){
 /* ───────────── Request context + CORS ───────────── */
 export function tenantFrom(req){
   const url = new URL(req.url);
+
+  // Prefer headers (engine-proxy forwards these), fall back to query
   const hdrShop = req.headers.get('x-shop') || req.headers.get('x-shopify-shop-domain') || '';
   const qsShop  = url.searchParams.get('shop') || '';
   const shop    = normShopDomain(hdrShop || qsShop);
@@ -185,7 +209,7 @@ export function corsWrap(res){
     'access-control-allow-headers': 'content-type, x-seoboss-forward-secret, x-shop, x-client-id'
   };
 
-  // Response instance passed?
+  // If a real Response instance was passed in
   if (res instanceof Response) {
     const headers = new Headers(res.headers);
     Object.entries(corsHeaders).forEach(([k,v]) => headers.set(k, v));
@@ -196,11 +220,10 @@ export function corsWrap(res){
     });
   }
 
-  // Init-style object
+  // Otherwise accept an init-like object { status?, headers?, body? }
   const headers = new Headers(res?.headers || {});
   Object.entries(corsHeaders).forEach(([k,v]) => headers.set(k, v));
 
-  // For 204, body must be null/undefined
   const status = res?.status ?? 200;
   const body = status === 204 ? null : (res?.body ?? '');
 
