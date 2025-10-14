@@ -75,6 +75,7 @@ export const handler = async (event) => {
      ───────────────────────────────────────────────────────────── */
   const forwardToFunction = async (fnName) => {
     const qs = new URLSearchParams(url.searchParams); // keep shop, logged_in_customer_id, etc.
+
     // Build target to the local function
     const host = event.headers["x-forwarded-host"] || event.headers.host;
     const scheme = event.headers["x-forwarded-proto"] || "https";
@@ -161,4 +162,8 @@ export const handler = async (event) => {
     headers: {
       "Content-Type": resp.headers.get("content-type") || "application/json",
       "Access-Control-Allow-Origin": ORIGIN,
-      "Access-Control-Expose-Header
+      "Access-Control-Expose-Headers": "Content-Type",
+    },
+    body: text,
+  };
+};
