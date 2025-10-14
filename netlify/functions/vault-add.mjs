@@ -3,7 +3,9 @@ import { verifyRequest, getSheetsClient, lookupClientSheetByShop, corsWrap, tena
 import { appendRowFromDict } from './sheets-dynamic.mjs';
 
 export default async (req, context) => {
-  if (req.method === 'OPTIONS') return corsWrap(new Response('', { status: 204 }));
+  // ✅ Proper 204 for preflight
+  if (req.method === 'OPTIONS') return corsWrap({ status: 204 });
+
   try {
     const auth = verifyRequest(req);
     if (!auth.ok) return corsWrap(new Response(JSON.stringify({ error:'unauthorized', mode:auth.mode }), { status: 401 }));
@@ -11,12 +13,7 @@ export default async (req, context) => {
     const { shop, client_id } = tenantFrom(req);
 
     let body = {};
-    try {
-      body = await req.json();
-    } catch {
-      // allow empty/malformed body; default to {}
-      body = {};
-    }
+    try { body = await req.json(); } catch { body = {}; }
 
     const now = new Date().toISOString();
     const clean = (v) => (v == null ? '' : String(v).trim());
@@ -36,7 +33,9 @@ export default async (req, context) => {
       created_at: now,
       updated_at: now,
       notes: clean(body.notes),
-      idea_source: clean(body.idea_source) || 'generator'
+      idea_source: clean(body.idea_source) || 'generator',
+      scheduled_for: clean(body.scheduled_for),
+      published_at: ''
     };
 
     const sheets = await getSheetsClient();
@@ -44,6 +43,7 @@ export default async (req, context) => {
     if (!sheetId) throw new Error('No sheet configured for this shop');
 
     await appendRowFromDict(sheets, sheetId, tab, row);
+
     return corsWrap(new Response(JSON.stringify({ ok:true, row }), {
       status:200, headers:{'content-type':'application/json'}
     }));
