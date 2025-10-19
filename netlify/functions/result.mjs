@@ -1,3 +1,4 @@
+// netlify/functions/result.mjs
 import { sb, json, CORS } from './_lib/_supabase.mjs';
 
 export default async (req) => {
@@ -7,14 +8,29 @@ export default async (req) => {
   try {
     const { searchParams } = new URL(req.url);
     const jobId = searchParams.get('jobId');
-    if (!jobId) return json({ error: 'Missing jobId' }, 400);
+    // prefer App Proxy-supplied shop, fallback to header
+    const shop =
+      searchParams.get('shop') ||
+      req.headers.get('x-shopify-shop-domain') ||
+      '';
+
+    if (!jobId || !shop) {
+      return json({ error: 'Missing jobId or shop' }, 400);
+    }
 
     const supa = sb();
-    const { data, error } = await supa.from('jobs').select('*').eq('job_id', jobId).single();
+    const { data, error } = await supa
+      .from('jobs')
+      .select('*')
+      .eq('job_id', jobId)
+      .eq('shop', shop.toLowerCase())
+      .single();
+
     if (error || !data) return json({ error: 'Not found' }, 404);
 
     return json({
       jobId,
+      shop,
       status: data.status,
       result: data.result_json ?? null,
       error: data.error_text ?? null,
