@@ -22,13 +22,13 @@
 
 # App Proxy → Job functions
 [[redirects]]
-from = "/apps/engine/v3/job/start"
+from = "/v3/job/start"
 to   = "/.netlify/functions/start"
 status = 200
 force = true
 
 [[redirects]]
-from = "/apps/engine/v3/job/result"
+from = "/v3/job/result"
 to   = "/.netlify/functions/result"
 status = 200
 force = true
