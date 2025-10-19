@@ -19,6 +19,21 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-XSS-Protection = "1; mode=block"
 
+
+# App Proxy → Job functions
+[[redirects]]
+from = "/apps/engine/v3/job/start"
+to   = "/.netlify/functions/start"
+status = 200
+force = true
+
+[[redirects]]
+from = "/apps/engine/v3/job/result"
+to   = "/.netlify/functions/result"
+status = 200
+force = true
+
+
 # Catch-all relay for SEOBoss API
 [[redirects]]
   from = "/seoboss/api/*"
