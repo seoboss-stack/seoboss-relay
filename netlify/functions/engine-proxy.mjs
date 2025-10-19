@@ -120,6 +120,8 @@ export const handler = async (event) => {
     };
   };
     // Jobs interceptor (App Proxy → Netlify functions)
+  if (suffix === "/v3/billing/status")    return await forwardToFunction("billing-status");
+  if (suffix === "/v3/billing/subscribe") return await forwardToFunction("billing-subscribe");
   if (suffix === "/v3/job/start")  return await forwardToFunction("start");
   if (suffix === "/v3/job/result") return await forwardToFunction("result");
 
