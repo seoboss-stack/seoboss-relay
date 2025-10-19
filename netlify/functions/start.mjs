@@ -40,9 +40,10 @@ export default async (req) => {
 
     // Callback back to our /done function
     const u = new URL(req.url);
-    u.pathname = '/.netlify/functions/done';
-    const callback = `${u.toString()}?token=${encodeURIComponent(secret)}`;
-
+u.pathname = '/.netlify/functions/done';
+u.search = '';                               // clear App Proxy qs (shop, timestamp, signature, etc.)
+u.searchParams.set('token', secret);         // add only what we need
+const callback = u.toString();
     const headers = {
       'content-type': 'application/json',
       'x-seoboss-forward-secret': secret,
