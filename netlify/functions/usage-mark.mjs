@@ -8,9 +8,15 @@ export default async (req) => {
 
   try {
     // server-to-server auth from n8n
-    const token = (new URL(req.url)).searchParams.get('token') || '';
-    if (token !== (process.env.FORWARD_SECRET || '')) return json({ error: 'Unauthorized' }, 401);
+    const u = new URL(req.url);
+const token =
+  u.searchParams.get('token') ||
+  req.headers.get('x-seoboss-forward-secret') ||
+  '';
 
+if (token !== (process.env.FORWARD_SECRET || '')) {
+  return json({ error: 'Unauthorized' }, 401);
+}
     const body   = await req.json().catch(() => ({}));
     const shop   = String(body.shop || '').toLowerCase().trim();
     const action = String(body.action || '').toLowerCase().trim();   // e.g. keyword_basic | keyword_ai
