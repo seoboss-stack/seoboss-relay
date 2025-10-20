@@ -7,21 +7,20 @@ export default async (req) => {
   if (req.method !== 'POST')    return json({ error: 'POST only' }, 405);
 
   try {
-    // server-to-server auth from n8n
     const u = new URL(req.url);
-const token =
-  u.searchParams.get('token') ||
-  req.headers.get('x-seoboss-forward-secret') ||
-  '';
+    const token = u.searchParams.get('token') || req.headers.get('x-seoboss-forward-secret') || '';
+    if (token !== (process.env.FORWARD_SECRET || '')) return json({ error: 'Unauthorized' }, 401);
 
-if (token !== (process.env.FORWARD_SECRET || '')) {
-  return json({ error: 'Unauthorized' }, 401);
-}
-    const body   = await req.json().catch(() => ({}));
+    let body = {};
+    try {
+      body = await req.json();
+    } catch (e) {
+      body = {};
+    }
+
     const shop   = String(body.shop || '').toLowerCase().trim();
     const action = String(body.action || '').toLowerCase().trim();   // e.g. keyword_basic | keyword_ai
     const units  = Number.isFinite(+body.cost_units) ? +body.cost_units : 1;
-
     if (!shop || !action) return json({ error: 'Missing shop or action' }, 400);
 
     const supa = sb();
@@ -30,8 +29,8 @@ if (token !== (process.env.FORWARD_SECRET || '')) {
       shop,
       action,
       cost_units: units,
-      status: 'done',                 // keywords are synchronous
-      result_json: null,              // optional: attach small metadata if you want
+      status: 'done',                                // keywords: synchronous
+      result_json: null,                             // optional small metadata
       ttl_at: new Date(Date.now() + 30*24*60*60*1000).toISOString()
     });
     if (error) return json({ error: 'db_insert_failed', detail: error.message }, 500);
