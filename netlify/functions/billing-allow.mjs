@@ -6,18 +6,20 @@ export default async (req) => {
   if (req.method !== 'POST')    return json({ error: 'POST only' }, 405);
 
   try {
+    // Accept secret via query OR header (header avoids zsh/URL encoding issues)
     const u = new URL(req.url);
-const token =
-  u.searchParams.get('token') ||
-  req.headers.get('x-seoboss-forward-secret') ||
-  '';
+    const token = u.searchParams.get('token') || req.headers.get('x-seoboss-forward-secret') || '';
+    if (token !== (process.env.FORWARD_SECRET || '')) return json({ error: 'Unauthorized' }, 401);
 
-if (token !== (process.env.FORWARD_SECRET || '')) {
-  return json({ error: 'Unauthorized' }, 401);
+    let body = {};
+    try {
+      body = await req.json();
+    } catch (e) {
+      body = {};
+    }
 
-    const body   = await req.json().catch(() => ({}));
     const shop   = String(body.shop || '').toLowerCase().trim();
-    const action = String(body.action || '').toLowerCase().trim();   // keyword_basic | keyword_ai
+    const action = String(body.action || '').toLowerCase().trim();   // e.g. keyword_basic | keyword_ai
     const units  = Number.isFinite(+body.cost_units) ? +body.cost_units : 1;
     if (!shop || !action) return json({ error: 'Missing shop or action' }, 400);
 
@@ -25,16 +27,17 @@ if (token !== (process.env.FORWARD_SECRET || '')) {
     const { data: planRow, error: pErr } =
       await supa.from('billing_plans').select('*').eq('shop', shop).maybeSingle();
     if (pErr) return json({ error: 'plan_read_failed', detail: pErr.message }, 500);
-    if (!planRow?.active) return json({ error: 'billing_inactive' }, 402);
+    if (!planRow || !planRow.active) return json({ error: 'billing_inactive' }, 402);
 
-    // per-action caps; 0 or missing => NOT IN PLAN
+    // Per-action caps: 0 or missing => not included in plan
     const capMap = planRow.caps_json || {};
-    const perActionCapRaw = capMap[action];
-    const perActionCap = Number.isFinite(+perActionCapRaw) ? +perActionCapRaw : 0;
+    const capRaw = capMap[action];
+    const perActionCap = Number.isFinite(+capRaw) ? +capRaw : 0;
     if (perActionCap <= 0) {
       return json({ error: 'feature_not_in_plan', action, cap: perActionCap }, 402);
     }
 
+    // Count this month's completed usage for this action
     const monthStart = new Date(); monthStart.setDate(1); monthStart.setHours(0,0,0,0);
     const { count, error: cErr } = await supa
       .from('jobs')
