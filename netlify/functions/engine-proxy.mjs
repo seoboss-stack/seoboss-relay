@@ -124,6 +124,8 @@ export const handler = async (event) => {
   if (suffix === "/v3/billing/subscribe") return await forwardToFunction("billing-subscribe");
   if (suffix === "/v3/job/start")  return await forwardToFunction("start");
   if (suffix === "/v3/job/result") return await forwardToFunction("result");
+  if (suffix === "/v3/billing/allow") return await forwardToFunction("billing-allow");
+  if (suffix === "/v3/usage/mark")    return await forwardToFunction("usage-mark");
 
   if (suffix === "/v3/vault/list")   return await forwardToFunction("vault-list");
   if (suffix === "/v3/vault/add")    return await forwardToFunction("vault-add");
