@@ -6,8 +6,14 @@ export default async (req) => {
   if (req.method !== 'POST')    return json({ error: 'POST only' }, 405);
 
   try {
-    const token = (new URL(req.url)).searchParams.get('token') || '';
-    if (token !== (process.env.FORWARD_SECRET || '')) return json({ error: 'Unauthorized' }, 401);
+    const u = new URL(req.url);
+const token =
+  u.searchParams.get('token') ||
+  req.headers.get('x-seoboss-forward-secret') ||
+  '';
+
+if (token !== (process.env.FORWARD_SECRET || '')) {
+  return json({ error: 'Unauthorized' }, 401);
 
     const body   = await req.json().catch(() => ({}));
     const shop   = String(body.shop || '').toLowerCase().trim();
