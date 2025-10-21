@@ -1,6 +1,6 @@
 // netlify/functions/shopify-callback.mjs
 import crypto from "node:crypto";
-import { logFnError } from "./log.mjs";
+import { errlog } from './_lib/_errlog.mjs';  // ✅ REPLACE OLD IMPORT
 
 // ---------- helpers ----------
 function parseCookies(header = "") {
@@ -111,7 +111,7 @@ async function postToN8NFireAndForget({ url, headers, body, timeoutMs = 2500 }) 
 
 // ---------- handler ----------
 export const handler = async (event) => {
-  const request_id = event.headers?.["x-nf-request-id"] || "";
+  const request_id = event.headers?.["x-nf-request-id"] || event.headers?.["x-request-id"] || "";
   let shop = "";
 
   try {
@@ -121,8 +121,33 @@ export const handler = async (event) => {
     const PUBLIC_HMAC_KEY = process.env.PUBLIC_HMAC_KEY || "";
     const FWD_SECRET = process.env.FORWARD_SECRET || "";
 
-    if (!API_KEY || !SECRET) return { statusCode: 500, body: "missing API key/secret" };
-    if (!ONBOARD_URL) return { statusCode: 500, body: "missing N8N_ONBOARD_SUBMIT_URL" };
+    if (!API_KEY || !SECRET) {
+      // ✅ ADD THIS - Log missing credentials
+      await errlog({
+        shop: '',
+        route: '/shopify-callback',
+        status: 500,
+        message: 'Missing Shopify API credentials',
+        detail: `API_KEY present: ${!!API_KEY}, SECRET present: ${!!SECRET}`,
+        request_id,
+        code: 'E_CONFIG'
+      });
+      return { statusCode: 500, body: "missing API key/secret" };
+    }
+
+    if (!ONBOARD_URL) {
+      // ✅ ADD THIS - Log missing n8n URL
+      await errlog({
+        shop: '',
+        route: '/shopify-callback',
+        status: 500,
+        message: 'N8N_ONBOARD_SUBMIT_URL not configured',
+        detail: 'Cannot complete onboarding flow',
+        request_id,
+        code: 'E_CONFIG'
+      });
+      return { statusCode: 500, body: "missing N8N_ONBOARD_SUBMIT_URL" };
+    }
 
     const url = new URL(event.rawUrl);
     const q = Object.fromEntries(url.searchParams.entries());
@@ -161,40 +186,56 @@ export const handler = async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: API_KEY, client_secret: SECRET, code }),
     });
+    
     if (!tokenRes.ok) {
       const errTxt = await tokenRes.text();
+      
+      // ✅ ADD THIS - Log token exchange failure
+      await errlog({
+        shop,
+        route: '/shopify-callback',
+        status: tokenRes.status,
+        message: 'Shopify token exchange failed',
+        detail: errTxt,
+        request_id,
+        code: 'E_OAUTH_TOKEN_EXCHANGE'
+      });
+      
       return { statusCode: 502, body: `token exchange failed: ${errTxt}` };
     }
+    
     const { access_token /*, scope*/ } = await tokenRes.json();
 
-    // Store token securely (don’t ship raw token to n8n in future)
+    // Store token securely (don't ship raw token to n8n in future)
     try {
       await storeTokenVault({ shop, access_token });
     } catch (e) {
-      try {
-        await logFnError({
-          fn: "shopify-callback/store-token",
-          shop,
-          status: 500,
-          message: e?.message || String(e),
-          request_id,
-        });
-      } catch {}
+      // ✅ REPLACE OLD LOGGING - Use new errlog
+      await errlog({
+        shop,
+        route: '/shopify-callback',
+        status: 500,
+        message: 'Failed to store access token in vault',
+        detail: e?.message || String(e),
+        request_id,
+        code: 'E_TOKEN_STORAGE'
+      }).catch(() => {}); // Fire and forget - don't block redirect
     }
 
     // Register app/uninstalled webhook
     try {
       await registerWebhooks({ shop, access_token, baseUrl: publicBaseUrl(event) });
     } catch (e) {
-      try {
-        await logFnError({
-          fn: "shopify-callback/register-webhooks",
-          shop,
-          status: 500,
-          message: e?.message || String(e),
-          request_id,
-        });
-      } catch {}
+      // ✅ REPLACE OLD LOGGING - Use new errlog
+      await errlog({
+        shop,
+        route: '/shopify-callback',
+        status: 500,
+        message: 'Failed to register webhooks',
+        detail: e?.message || String(e),
+        request_id,
+        code: 'E_WEBHOOK_REGISTRATION'
+      }).catch(() => {}); // Fire and forget - don't block redirect
     }
 
     // Prepare one-time onboarding POST to n8n
@@ -216,6 +257,7 @@ export const handler = async (event) => {
       "X-SEOBOSS-FORWARD-SECRET": FWD_SECRET,
       "X-Seoboss-Ts": ts2,
       "X-Seoboss-Key-Id": "global",
+      "X-Request-Id": request_id,  // ✅ ADD THIS - Forward correlation ID
     };
     if (PUBLIC_HMAC_KEY) {
       const sig = crypto.createHmac("sha256", PUBLIC_HMAC_KEY).update(bodyForm + "\n" + ts2).digest("hex");
@@ -228,7 +270,19 @@ export const handler = async (event) => {
       headers,
       body: bodyForm,
       timeoutMs: 2500,
-    }).catch(() => "");
+    }).catch((e) => {
+      // ✅ ADD THIS - Log n8n onboarding failure (fire and forget)
+      errlog({
+        shop,
+        route: '/shopify-callback',
+        status: 500,
+        message: 'Failed to notify n8n of onboarding',
+        detail: e?.message || String(e),
+        request_id,
+        code: 'E_N8N_ONBOARDING'
+      }).catch(() => {}); // Fire and forget
+      return "";
+    });
 
     // Redirect to Connect with installed=1 (and client_id if available)
     const qp = new URLSearchParams({ shop, installed: "1" });
@@ -244,17 +298,19 @@ export const handler = async (event) => {
       },
       body: "",
     };
+    
   } catch (e) {
-    try {
-      await logFnError({
-        fn: "shopify-callback",
-        shop,
-        status: e?.status || 500,
-        message: e?.message || String(e),
-        request_id,
-        stack: e?.stack || null,
-      });
-    } catch {}
+    // ✅ REPLACE OLD LOGGING - Use new errlog
+    await errlog({
+      shop,
+      route: '/shopify-callback',
+      status: e?.status || 500,
+      message: 'Uncaught exception in OAuth callback',
+      detail: e.stack || e?.message || String(e),
+      request_id,
+      code: 'E_EXCEPTION'
+    }).catch(() => {}); // Fire and forget - don't block redirect
+    
     return {
       statusCode: 302,
       headers: {
