@@ -2,8 +2,12 @@
 import { verifyRequest, getSheetsClient, lookupClientSheetByShop, corsWrap, tenantFrom } from './shared.mjs';
 import { appendRowFromDict, readAllRowsAsDicts } from './sheets-dynamic.mjs';
 import { randomUUID } from 'node:crypto';
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 export default async (req, context) => {
+  // ✅ ADD THIS - Extract request_id early
+  const request_id = req.headers.get('x-request-id') || req.headers.get('X-Request-Id') || '';
+  
   // ✅ Proper 204 for preflight
   if (req.method === 'OPTIONS') return corsWrap({ status: 204 });
 
@@ -19,7 +23,6 @@ export default async (req, context) => {
     }
 
     const { shop, client_id } = tenantFrom(req);
-
     let body = {};
     try { body = await req.json(); } catch { body = {}; }
 
@@ -27,17 +30,64 @@ export default async (req, context) => {
     const clean = (v) => (v == null ? '' : String(v).trim());
 
     // Sheets client + tenant sheet/tab
-    const sheets = await getSheetsClient();
-    const { sheetId, tab } = await lookupClientSheetByShop({ sheets, shopDomain: shop, clientId: client_id });
-    if (!sheetId) throw new Error('No sheet configured for this shop');
+    let sheets, sheetId, tab;
+    try {
+      sheets = await getSheetsClient();
+      const result = await lookupClientSheetByShop({ sheets, shopDomain: shop, clientId: client_id });
+      sheetId = result.sheetId;
+      tab = result.tab;
+    } catch (err) {
+      // ✅ ADD THIS - Log Google Sheets client/lookup failure
+      await errlog({
+        shop,
+        route: '/vault-add',
+        status: 500,
+        message: 'Failed to connect to Google Sheets',
+        detail: err.message || String(err),
+        request_id,
+        code: 'E_SHEETS_CONNECTION',
+        client_id
+      });
+      throw err;
+    }
+
+    if (!sheetId) {
+      // ✅ ADD THIS - Log missing sheet configuration
+      await errlog({
+        shop,
+        route: '/vault-add',
+        status: 500,
+        message: 'No sheet configured for this shop',
+        detail: `shop: ${shop}, client_id: ${client_id}`,
+        request_id,
+        code: 'E_SHEETS_NOT_CONFIGURED',
+        client_id
+      });
+      throw new Error('No sheet configured for this shop');
+    }
 
     // Make a unique vault_id (compact UUID) with a quick collision check
     const makeUniqueVaultId = async () => {
-      const rows = await readAllRowsAsDicts(sheets, sheetId, tab);
-      const existing = new Set(rows.map(r => String(r.vault_id || '')));
-      let id = clean(body.vault_id) || randomUUID().replace(/-/g, '');
-      while (existing.has(id)) id = randomUUID().replace(/-/g, '');
-      return id;
+      try {
+        const rows = await readAllRowsAsDicts(sheets, sheetId, tab);
+        const existing = new Set(rows.map(r => String(r.vault_id || '')));
+        let id = clean(body.vault_id) || randomUUID().replace(/-/g, '');
+        while (existing.has(id)) id = randomUUID().replace(/-/g, '');
+        return id;
+      } catch (err) {
+        // ✅ ADD THIS - Log sheet read failure
+        await errlog({
+          shop,
+          route: '/vault-add',
+          status: 500,
+          message: 'Failed to read vault rows for ID collision check',
+          detail: err.message || String(err),
+          request_id,
+          code: 'E_SHEETS_READ',
+          client_id
+        });
+        throw err;
+      }
     };
 
     // Normalize status
@@ -64,13 +114,42 @@ export default async (req, context) => {
       published_at: ''
     };
 
-    await appendRowFromDict(sheets, sheetId, tab, row);
+    try {
+      await appendRowFromDict(sheets, sheetId, tab, row);
+    } catch (err) {
+      // ✅ ADD THIS - Log sheet append failure
+      await errlog({
+        shop,
+        route: '/vault-add',
+        status: 500,
+        message: 'Failed to append row to Google Sheets',
+        detail: err.message || String(err),
+        request_id,
+        code: 'E_SHEETS_WRITE',
+        client_id
+      });
+      throw err;
+    }
 
     return corsWrap(new Response(JSON.stringify({ ok:true, row }), {
       status: 200,
       headers: { 'content-type': 'application/json' }
     }));
+
   } catch (err) {
+    // ✅ ADD THIS - Log uncaught exceptions
+    const { shop, client_id } = tenantFrom(req);
+    await errlog({
+      shop,
+      route: '/vault-add',
+      status: 500,
+      message: 'Uncaught exception in vault-add',
+      detail: err.stack || err.message || String(err),
+      request_id,
+      code: 'E_EXCEPTION',
+      client_id
+    });
+
     return corsWrap(new Response(JSON.stringify({ error: err.message || String(err) }), { status: 500 }));
   }
 };
