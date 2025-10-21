@@ -1,5 +1,6 @@
 // netlify/functions/relay.js — secure API relay (with Shopify origin allow + logging)
-const crypto = require("crypto");
+import crypto from "crypto";
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 // ===== ALLOWLIST (no env required) =====
 // - Your site
@@ -86,9 +87,12 @@ function json(statusCode, bodyObj, origin, isProvider) {
   };
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {  // ✅ CHANGED: exports.handler → export const handler
   const started = Date.now();
   const rid = Math.random().toString(36).slice(2, 8);
+  
+  // ✅ ADD THIS - Extract request_id early
+  const request_id = event.headers?.["x-request-id"] || event.headers?.["X-Request-Id"] || rid;
 
   const origin =
     event.headers.origin ||
@@ -172,7 +176,7 @@ exports.handler = async (event) => {
     }
   }
 
-  // Forward to n8n with a safety timeout (25s)
+  // Forward to n8n with a safety timeout (60s)
   try {
     const ct =
       event.headers["content-type"] ||
@@ -191,12 +195,27 @@ exports.handler = async (event) => {
         "X-Seoboss-Ts": event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "",
         "X-Seoboss-Hmac": event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "",
         "X-Seoboss-Key-Id": event.headers["x-seoboss-key-id"] || event.headers["X-Seoboss-Key-Id"] || "",
+        "X-Request-Id": request_id,  // ✅ ADD THIS - Forward correlation ID
       },
       body: raw,
       signal: controller.signal,
     });
 
     clearTimeout(t);
+
+    // ✅ ADD THIS - Log if n8n returns 500+
+    if (resp.status >= 500) {
+      const errorText = await resp.clone().text();
+      await errlog({
+        shop: '', // Relay doesn't always have shop context
+        route: `/relay${path}`,
+        status: resp.status,
+        message: `n8n endpoint ${path} returned error`,
+        detail: errorText.slice(0, 500),
+        request_id,
+        code: 'E_N8N_FAILED'
+      }).catch(() => {}); // Fire and forget
+    }
 
     const text = await resp.text();
     const contentType = resp.headers.get("content-type") || "application/json";
@@ -214,6 +233,17 @@ exports.handler = async (event) => {
       body: text,
     };
   } catch (err) {
+    // ✅ ADD THIS - Log fetch failures
+    await errlog({
+      shop: '',
+      route: `/relay${path}`,
+      status: 502,
+      message: `Failed to reach n8n endpoint ${path}`,
+      detail: err.message || String(err),
+      request_id,
+      code: 'E_N8N_UNREACHABLE'
+    }).catch(() => {}); // Fire and forget
+    
     console.log(`[relay] rid=${rid} 502 upstream_error dur_ms=${Date.now() - started} msg=${err.message}`);
     return json(502, { ok: false, error: "upstream_error" }, origin, provider);
   }
