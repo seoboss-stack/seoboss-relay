@@ -1,9 +1,13 @@
 // netlify/functions/billing-allow.mjs
 import { sb, json, CORS } from './_lib/_supabase.mjs';
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS LINE
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST')    return json({ error: 'POST only' }, 405);
+
+  // ✅ EXTRACT REQUEST ID (add after method check)
+  const request_id = req.headers.get('x-request-id') || '';
 
   try {
     // Accept secret via query OR header (header avoids zsh/URL encoding issues)
@@ -21,18 +25,34 @@ export default async (req) => {
     const shop   = String(body.shop || '').toLowerCase().trim();
     const action = String(body.action || '').toLowerCase().trim();   // e.g. keyword_basic | keyword_ai
     const units  = Number.isFinite(+body.cost_units) ? +body.cost_units : 1;
+
     if (!shop || !action) return json({ error: 'Missing shop or action' }, 400);
 
     const supa = sb();
     const { data: planRow, error: pErr } =
       await supa.from('billing_plans').select('*').eq('shop', shop).maybeSingle();
-    if (pErr) return json({ error: 'plan_read_failed', detail: pErr.message }, 500);
+
+    // ✅ LOG 500 ERRORS (replace existing return)
+    if (pErr) {
+      await errlog({
+        shop,
+        route: '/billing-allow',
+        status: 500,
+        message: 'Failed to read billing plan',
+        detail: pErr.message,
+        request_id,
+        code: 'E_DB_READ'
+      });
+      return json({ error: 'plan_read_failed', detail: pErr.message }, 500);
+    }
+
     if (!planRow || !planRow.active) return json({ error: 'billing_inactive' }, 402);
 
     // Per-action caps: 0 or missing => not included in plan
     const capMap = planRow.caps_json || {};
     const capRaw = capMap[action];
     const perActionCap = Number.isFinite(+capRaw) ? +capRaw : 0;
+
     if (perActionCap <= 0) {
       return json({ error: 'feature_not_in_plan', action, cap: perActionCap }, 402);
     }
@@ -46,7 +66,20 @@ export default async (req) => {
       .eq('status', 'done')
       .eq('action', action)
       .gte('created_at', monthStart.toISOString());
-    if (cErr) return json({ error: 'count_failed', detail: cErr.message }, 500);
+
+    // ✅ LOG 500 ERRORS (replace existing return)
+    if (cErr) {
+      await errlog({
+        shop,
+        route: '/billing-allow',
+        status: 500,
+        message: 'Failed to count usage',
+        detail: cErr.message,
+        request_id,
+        code: 'E_DB_COUNT'
+      });
+      return json({ error: 'count_failed', detail: cErr.message }, 500);
+    }
 
     const used = count ?? 0;
     if (used + units > perActionCap) {
@@ -54,7 +87,18 @@ export default async (req) => {
     }
 
     return json({ ok: true, action, used, cap: perActionCap }, 200);
+
   } catch (e) {
+    // ✅ LOG UNCAUGHT ERRORS (replace existing catch)
+    await errlog({
+      shop: body?.shop || '',
+      route: '/billing-allow',
+      status: 500,
+      message: 'Uncaught exception',
+      detail: e.stack || String(e),
+      request_id,
+      code: 'E_EXCEPTION'
+    });
     return json({ error: 'internal', detail: String(e) }, 500);
   }
 };
