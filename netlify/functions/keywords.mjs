@@ -1,6 +1,7 @@
 // netlify/functions/keywords.mjs
 // Uses global fetch (Node 18+). No node-fetch needed.
 import crypto from "node:crypto"; // node: prefix is best practice on Netlify
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 const D4S_BASE = "https://api.dataforseo.com/v3";
 const D4S_USER = process.env.D4S_USER;
@@ -83,6 +84,9 @@ async function d4sPOST(path, bodyArray) {
 }
 
 export async function handler(event) {
+  // ✅ ADD THIS - Extract request_id
+  const request_id = event.headers?.["x-request-id"] || event.headers?.["X-Request-Id"] || '';
+  
   try {
     if (event.httpMethod !== "POST") {
       return { statusCode: 405, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "Only POST", items: [] }) };
@@ -104,6 +108,21 @@ export async function handler(event) {
       language = "en",
       max = 30,
     } = req;
+
+    // ✅ ADD THIS - Validate DataForSEO credentials
+    if (!D4S_USER || !D4S_PASS) {
+      await errlog({
+        shop: '',
+        route: '/keywords',
+        status: 500,
+        message: 'DataForSEO credentials not configured',
+        detail: `D4S_USER present: ${!!D4S_USER}, D4S_PASS present: ${!!D4S_PASS}`,
+        request_id,
+        code: 'E_CONFIG'
+      }).catch(() => {});
+      
+      return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: "API not configured", items: [] }) };
+    }
 
     const location_code = LOC[String(market).toUpperCase()] || 2840;
     const language_code = String(language).toLowerCase();
@@ -150,11 +169,43 @@ export async function handler(event) {
     }
 
     // IMPORTANT: DataForSEO wants an ARRAY of tasks
-    const d4s = await d4sPOST(path, [task]);
+    let d4s;
+    try {
+      d4s = await d4sPOST(path, [task]);
+    } catch (err) {
+      // ✅ ADD THIS - Log DataForSEO API failures
+      await errlog({
+        shop: '',
+        route: '/keywords',
+        status: 500,
+        message: `DataForSEO API failed for mode: ${mode}`,
+        detail: `seed: ${seed}, url: ${url}, error: ${err.message}`,
+        request_id,
+        code: 'E_DATAFORSEO_API'
+      }).catch(() => {});
+      
+      throw err; // Re-throw to hit outer catch
+    }
+
     const items = extractItems(d4s).map(normItem).filter(x => x.keyword);
 
     return { statusCode: 200, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ items }) };
+    
   } catch (err) {
+    // ✅ ADD THIS - Log uncaught exceptions
+    let req = {};
+    try { req = JSON.parse(event.body || "{}"); } catch {}
+    
+    await errlog({
+      shop: '',
+      route: '/keywords',
+      status: 500,
+      message: 'Uncaught exception in keywords endpoint',
+      detail: `mode: ${req.mode}, seed: ${req.seed}, error: ${err.stack || err.message || String(err)}`,
+      request_id,
+      code: 'E_EXCEPTION'
+    }).catch(() => {});
+    
     return { statusCode: 500, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ error: String(err.message || err), items: [] }) };
   }
 }
