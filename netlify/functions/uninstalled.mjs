@@ -1,5 +1,6 @@
 // netlify/functions/uninstalled.mjs
 import crypto from "node:crypto";
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 const json = (s, b) => ({
   statusCode: s,
@@ -21,6 +22,9 @@ const safeHmac = (raw, secret, sentB64) => {
 };
 
 export const handler = async (event) => {
+  // ✅ ADD THIS - Extract request_id
+  const request_id = event.headers?.["x-request-id"] || event.headers?.["X-Request-Id"] || '';
+  
   if (event.httpMethod !== "POST") return json(405, "POST only");
 
   const SECRET =
@@ -43,6 +47,7 @@ export const handler = async (event) => {
   // Parse payload AFTER HMAC passes (optional; headers usually include shop)
   let payload = {};
   try { payload = JSON.parse(raw.toString("utf8") || "{}"); } catch {}
+
   const shop =
     headers["x-shopify-shop-domain"] ||
     payload?.myshopify_domain ||
@@ -52,7 +57,7 @@ export const handler = async (event) => {
   // 1) Purge token immediately (idempotent, best-effort, non-blocking)
   try {
     const base = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || "").replace(/\/$/, "");
-    await fetch(`${base}/.netlify/functions/delete-shop-token`, {
+    const resp = await fetch(`${base}/.netlify/functions/delete-shop-token`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -60,16 +65,42 @@ export const handler = async (event) => {
       },
       body: JSON.stringify({ shop }),
     });
-  } catch (_) { /* do not block ACK */ }
+    
+    // ✅ ADD THIS - Log if token deletion failed (but don't block ACK)
+    if (!resp.ok) {
+      const errorText = await resp.text().catch(() => 'unknown');
+      errlog({
+        shop,
+        route: '/uninstalled',
+        status: resp.status,
+        message: 'Failed to delete shop token on uninstall',
+        detail: errorText,
+        request_id,
+        code: 'E_TOKEN_DELETE_FAILED'
+      }).catch(() => {}); // Fire and forget - don't block Shopify ACK
+    }
+  } catch (err) {
+    // ✅ ADD THIS - Log fetch failure (but don't block ACK)
+    errlog({
+      shop,
+      route: '/uninstalled',
+      status: 500,
+      message: 'Exception while deleting shop token on uninstall',
+      detail: err.message || String(err),
+      request_id,
+      code: 'E_TOKEN_DELETE_EXCEPTION'
+    }).catch(() => {}); // Fire and forget
+  }
 
   // 2) Notify n8n for bookkeeping (status flags, logs, emails, etc.)
   try {
     if (N8N_URL) {
-      await fetch(N8N_URL, {
+      const resp = await fetch(N8N_URL, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "X-SEOBOSS-FORWARD-SECRET": FWD,
+          "X-Request-Id": request_id,  // ✅ ADD THIS - Forward correlation ID
         },
         body: JSON.stringify({
           op: "deactivate_shop",     // <- consistent op
@@ -79,8 +110,33 @@ export const handler = async (event) => {
           uninstalled_at: new Date().toISOString(),
         }),
       });
+      
+      // ✅ ADD THIS - Log if n8n notification failed (but don't block ACK)
+      if (!resp.ok) {
+        const errorText = await resp.text().catch(() => 'unknown');
+        errlog({
+          shop,
+          route: '/uninstalled',
+          status: resp.status,
+          message: 'Failed to notify n8n of uninstall',
+          detail: errorText,
+          request_id,
+          code: 'E_N8N_NOTIFICATION_FAILED'
+        }).catch(() => {}); // Fire and forget
+      }
     }
-  } catch (_) { /* do not block ACK */ }
+  } catch (err) {
+    // ✅ ADD THIS - Log fetch failure (but don't block ACK)
+    errlog({
+      shop,
+      route: '/uninstalled',
+      status: 500,
+      message: 'Exception while notifying n8n of uninstall',
+      detail: err.message || String(err),
+      request_id,
+      code: 'E_N8N_NOTIFICATION_EXCEPTION'
+    }).catch(() => {}); // Fire and forget
+  }
 
   // ACK fast so Shopify doesn't retry
   return json(200, { ok: true, shop, topic });
