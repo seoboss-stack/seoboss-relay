@@ -1,4 +1,5 @@
 import { sb, json, CORS } from './_lib/_supabase.mjs';
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 // Accept whatever the UI sends, normalize to an internal key
 const PLAN_ALIASES = {
@@ -42,6 +43,9 @@ export default async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status:204, headers: CORS });
   if (req.method !== 'POST')    return json({ error:'POST only' }, 405);
 
+  // ✅ ADD THIS - Extract request_id
+  const request_id = req.headers.get('x-request-id') || '';
+
   try {
     const body = await req.json().catch(()=> ({}));
     const u = new URL(req.url);
@@ -49,6 +53,7 @@ export default async (req) => {
     const requested = (body.plan || 'starter').toLowerCase().trim();
     const planKey = normalizePlan(requested);
     const trialDays = Number.isFinite(+body.trial_days) ? Math.max(0, +body.trial_days) : 0;
+
     if (!shop) return json({ error:'Missing shop' }, 400);
 
     const supa = sb();
@@ -57,7 +62,7 @@ export default async (req) => {
       // Store as starter while trial is active (matches your old behavior)
       const { monthly_cap, caps_json } = capsFor('starter');
       const until = new Date(Date.now() + (trialDays || 3) * 86400 * 1000);
-
+      
       await supa.from('billing_plans').upsert({
         shop,
         plan: 'starter',
@@ -73,6 +78,7 @@ export default async (req) => {
 
     // Regular paid plan
     const { monthly_cap, caps_json } = capsFor(planKey);
+    
     await supa.from('billing_plans').upsert({
       shop,
       plan: planKey,           // <- change this later to 'boss' if you rename the slug
@@ -84,7 +90,19 @@ export default async (req) => {
     });
 
     return json({ ok:true, confirmation_url: `/apps/engine/thanks?plan=${encodeURIComponent(planKey)}` }, 200);
+
   } catch (e) {
+    // ✅ ADD THIS - Log uncaught exceptions
+    const body = await req.json().catch(() => ({}));
+    await errlog({
+      shop: body.shop || '',
+      route: '/billing-subscribe',
+      status: 500,
+      message: 'Failed to update billing plan',
+      detail: e.stack || String(e),
+      request_id,
+      code: 'E_EXCEPTION'
+    });
     return json({ error:'internal', detail:String(e) }, 500);
   }
 };
