@@ -1,5 +1,6 @@
 // netlify/functions/create-engine-page.mjs
 import crypto from "node:crypto";
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 // --- helpers (same normalization you use elsewhere) ---
 const normShop = (s = "") =>
@@ -38,6 +39,9 @@ async function getShopTokenViaFn({ shop, client_id, forwardSecret }) {
 }
 
 export const handler = async (event) => {
+  // ✅ ADD THIS - Extract request_id early
+  const request_id = event.headers?.["x-request-id"] || event.headers?.["X-Request-Id"] || '';
+
   try {
     if (event.httpMethod === "OPTIONS") {
       return {
@@ -69,7 +73,24 @@ export const handler = async (event) => {
     if (!shop && !client_id) return json(400, { error: "shop or client_id required" });
 
     // 1) get Admin token
-    const { token } = await getShopTokenViaFn({ shop, client_id, forwardSecret: process.env.FORWARD_SECRET });
+    let token;
+    try {
+      const result = await getShopTokenViaFn({ shop, client_id, forwardSecret: process.env.FORWARD_SECRET });
+      token = result.token;
+    } catch (err) {
+      // ✅ ADD THIS - Log token retrieval failure
+      await errlog({
+        shop,
+        route: '/create-engine-page',
+        status: 500,
+        message: 'Failed to retrieve shop token',
+        detail: err.message || String(err),
+        request_id,
+        code: 'E_TOKEN_RETRIEVAL',
+        client_id
+      });
+      return json(500, { error: 'token_retrieval_failed', detail: err.message });
+    }
 
     const host = shop || ""; // may be filled by get-shop-token, but we already normalized
     const api = `https://${host}/admin/api/2024-10`;
@@ -80,7 +101,23 @@ export const handler = async (event) => {
       const rsp = await fetch(`${api}/pages.json?limit=10&title=${encodeURIComponent(title)}`, {
         headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
       });
-      if (!rsp.ok) return json(rsp.status, { error: `list pages failed`, raw: await rsp.text() });
+      
+      // ✅ ADD THIS - Log Shopify API list failure
+      if (!rsp.ok) {
+        const rawText = await rsp.text();
+        await errlog({
+          shop,
+          route: '/create-engine-page',
+          status: rsp.status,
+          message: 'Shopify list pages API failed',
+          detail: rawText,
+          request_id,
+          code: 'E_SHOPIFY_API',
+          client_id
+        });
+        return json(rsp.status, { error: `list pages failed`, raw: rawText });
+      }
+      
       const d = await rsp.json();
       page = Array.isArray(d.pages) && d.pages.find(p => (p.title || "").toLowerCase() === title.toLowerCase()) || null;
     }
@@ -104,7 +141,23 @@ export const handler = async (event) => {
           }
         })
       });
-      if (!createRsp.ok) return json(createRsp.status, { error: "create page failed", raw: await createRsp.text() });
+      
+      // ✅ ADD THIS - Log page creation failure
+      if (!createRsp.ok) {
+        const rawText = await createRsp.text();
+        await errlog({
+          shop,
+          route: '/create-engine-page',
+          status: createRsp.status,
+          message: 'Shopify create page API failed',
+          detail: rawText,
+          request_id,
+          code: 'E_SHOPIFY_API',
+          client_id
+        });
+        return json(createRsp.status, { error: "create page failed", raw: rawText });
+      }
+      
       const out = await createRsp.json();
       page = out.page;
     } else {
@@ -120,7 +173,23 @@ export const handler = async (event) => {
           }
         })
       });
-      if (!updRsp.ok) return json(updRsp.status, { error: "update page failed", raw: await updRsp.text() });
+      
+      // ✅ ADD THIS - Log page update failure
+      if (!updRsp.ok) {
+        const rawText = await updRsp.text();
+        await errlog({
+          shop,
+          route: '/create-engine-page',
+          status: updRsp.status,
+          message: 'Shopify update page API failed',
+          detail: rawText,
+          request_id,
+          code: 'E_SHOPIFY_API',
+          client_id
+        });
+        return json(updRsp.status, { error: "update page failed", raw: rawText });
+      }
+      
       const out = await updRsp.json();
       page = out.page;
     }
@@ -130,7 +199,23 @@ export const handler = async (event) => {
     const url = `https://${host}/pages/${handle}`;
 
     return json(200, { ok: true, url, page_id: page.id, handle, shop: host, client_id });
+    
   } catch (e) {
+    // ✅ ADD THIS - Log uncaught exceptions
+    let body = {};
+    try { body = JSON.parse(event.body || "{}"); } catch {}
+    
+    await errlog({
+      shop: normShop(body.shop || ''),
+      route: '/create-engine-page',
+      status: 500,
+      message: 'Uncaught exception in create-engine-page',
+      detail: e.stack || String(e),
+      request_id,
+      code: 'E_EXCEPTION',
+      client_id: body.client_id || ''
+    });
+    
     return json(500, { error: e?.message || String(e) });
   }
 };
