@@ -1,4 +1,5 @@
 import { sb, json, CORS } from './_lib/_supabase.mjs';
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 function getShop(req){
   const u = new URL(req.url);
@@ -12,6 +13,9 @@ export default async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status:204, headers: CORS });
   if (req.method !== 'GET')     return json({ error:'GET only' }, 405);
 
+  // ✅ ADD THIS - Extract request_id early
+  const request_id = req.headers.get('x-request-id') || '';
+
   try {
     const shop = getShop(req);
     if (!shop) return json({ error:'Missing shop' }, 400);
@@ -20,7 +24,20 @@ export default async (req) => {
     // ---------- PLAN LOOKUP (unchanged) ----------
     const { data: planRow, error: planErr } =
       await supa.from('billing_plans').select('*').eq('shop', shop).maybeSingle();
-    if (planErr) return json({ error:'plan_lookup_failed', detail: planErr.message }, 500);
+    
+    // ✅ ADD THIS - Log if plan lookup fails
+    if (planErr) {
+      await errlog({
+        shop,
+        route: '/billing-status',
+        status: 500,
+        message: 'Failed to lookup billing plan',
+        detail: planErr.message,
+        request_id,
+        code: 'E_DB_READ'
+      });
+      return json({ error:'plan_lookup_failed', detail: planErr.message }, 500);
+    }
 
     const plan         = planRow?.plan || 'starter';
     const active       = !!planRow?.active;
@@ -42,7 +59,7 @@ export default async (req) => {
     let used_kw_ai_this_month    = 0;
     let used_units_this_month    = 0;
 
-    // Try your v2 view first (yesterday’s addition)
+    // Try your v2 view first (yesterday's addition)
     // Expect columns like: used_articles_this_month, used_kw_basic_this_month, used_kw_ai_this_month, used_units_this_month
     const { data: v2, error: v2Err } =
       await supa.from('billing_plans_with_usage').select('*').eq('shop', shop).maybeSingle();
@@ -66,7 +83,20 @@ export default async (req) => {
           .eq('shop', shop).eq('status', 'done')
           .or('action.eq.article,action.is.null')
           .gte('created_at', since);
-        if (error) return json({ error:'count_failed_articles', detail:error.message }, 500);
+        
+        // ✅ ADD THIS - Log if articles count fails
+        if (error) {
+          await errlog({
+            shop,
+            route: '/billing-status',
+            status: 500,
+            message: 'Failed to count articles',
+            detail: error.message,
+            request_id,
+            code: 'E_DB_COUNT'
+          });
+          return json({ error:'count_failed_articles', detail:error.message }, 500);
+        }
         used_articles_this_month = count || 0;
       }
 
@@ -78,7 +108,20 @@ export default async (req) => {
           .eq('shop', shop).eq('status', 'done')
           .in('action', ['keyword_search','keyword_buyer','keyword_questions'])
           .gte('created_at', since);
-        if (error) return json({ error:'count_failed_kw_basic', detail:error.message }, 500);
+        
+        // ✅ ADD THIS - Log if keyword_basic count fails
+        if (error) {
+          await errlog({
+            shop,
+            route: '/billing-status',
+            status: 500,
+            message: 'Failed to count keyword_basic usage',
+            detail: error.message,
+            request_id,
+            code: 'E_DB_COUNT'
+          });
+          return json({ error:'count_failed_kw_basic', detail:error.message }, 500);
+        }
         used_kw_basic_this_month = count || 0;
       }
 
@@ -90,7 +133,20 @@ export default async (req) => {
           .eq('shop', shop).eq('status', 'done')
           .eq('action', 'keyword_ai')
           .gte('created_at', since);
-        if (error) return json({ error:'count_failed_kw_ai', detail:error.message }, 500);
+        
+        // ✅ ADD THIS - Log if keyword_ai count fails
+        if (error) {
+          await errlog({
+            shop,
+            route: '/billing-status',
+            status: 500,
+            message: 'Failed to count keyword_ai usage',
+            detail: error.message,
+            request_id,
+            code: 'E_DB_COUNT'
+          });
+          return json({ error:'count_failed_kw_ai', detail:error.message }, 500);
+        }
         used_kw_ai_this_month = count || 0;
       }
 
@@ -101,7 +157,20 @@ export default async (req) => {
           .select('cost_units')
           .eq('shop', shop).eq('status', 'done')
           .gte('created_at', since);
-        if (error) return json({ error:'units_sum_failed', detail:error.message }, 500);
+        
+        // ✅ ADD THIS - Log if units sum fails
+        if (error) {
+          await errlog({
+            shop,
+            route: '/billing-status',
+            status: 500,
+            message: 'Failed to sum cost units',
+            detail: error.message,
+            request_id,
+            code: 'E_DB_COUNT'
+          });
+          return json({ error:'units_sum_failed', detail:error.message }, 500);
+        }
         used_units_this_month = (rows || []).reduce((a,r)=>a+(r?.cost_units||0), 0);
       }
     }
@@ -109,7 +178,7 @@ export default async (req) => {
     // Back-compat: your original "used_this_month" equals article count
     const used_this_month = used_articles_this_month;
 
-    // ---------- RESPONSE (additive; won’t break anything) ----------
+    // ---------- RESPONSE (additive; won't break anything) ----------
     return json({
       status, plan,
       monthly_cap,
@@ -138,6 +207,16 @@ export default async (req) => {
     }, 200);
 
   } catch (e) {
+    // ✅ ADD THIS - Log uncaught exceptions
+    await errlog({
+      shop: getShop(req),
+      route: '/billing-status',
+      status: 500,
+      message: 'Uncaught exception in billing-status',
+      detail: e.stack || String(e),
+      request_id,
+      code: 'E_EXCEPTION'
+    });
     return json({ error:'internal', detail:String(e) }, 500);
   }
 };
