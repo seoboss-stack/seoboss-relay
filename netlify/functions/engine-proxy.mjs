@@ -1,5 +1,6 @@
 // netlify/functions/engine-proxy.mjs
 import crypto from "node:crypto";
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 const ORIGIN = "https://seoboss.com"; // CORS for n8n-forwarded routes
 
@@ -51,8 +52,12 @@ function verifyWithSecret(url, secret) {
 }
 
 export const handler = async (event) => {
+  // ✅ ADD THIS - Extract request_id early
+  const request_id = event.headers?.["x-request-id"] || event.headers?.["X-Request-Id"] || '';
+  
   const url = new URL(event.rawUrl);
   const suffix = getSuffix(url);
+  const shop = url.searchParams.get("shop") || "";
 
   // 0) health check
   if (suffix === "/_alive") {
@@ -91,35 +96,66 @@ export const handler = async (event) => {
     const shopFromQs = url.searchParams.get("shop") || "";
     const clientIdFromQs = url.searchParams.get("client_id") || "";
 
-    const resp = await fetch(target, {
-      method,
-      headers: {
-        "Content-Type":
-          event.headers?.["content-type"] ||
-          event.headers?.["Content-Type"] ||
-          "application/json",
-        // server-side trust: let vault-* functions auth via forward-secret
-        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
-        // also pass tenant hints as headers (tenantFrom() reads these)
-        "x-shop": shopFromQs || event.headers["x-shop"] || "",
-        "x-client-id": clientIdFromQs || event.headers["x-client-id"] || "",
-      },
-      body: needsBody ? rawBody : undefined,
-    });
+    try {
+      const resp = await fetch(target, {
+        method,
+        headers: {
+          "Content-Type":
+            event.headers?.["content-type"] ||
+            event.headers?.["Content-Type"] ||
+            "application/json",
+          // server-side trust: let vault-* functions auth via forward-secret
+          "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
+          // ✅ ADD THIS - Forward correlation ID
+          "X-Request-Id": request_id,
+          // also pass tenant hints as headers (tenantFrom() reads these)
+          "x-shop": shopFromQs || event.headers["x-shop"] || "",
+          "x-client-id": clientIdFromQs || event.headers["x-client-id"] || "",
+        },
+        body: needsBody ? rawBody : undefined,
+      });
 
-    const text = await resp.text();
-    return {
-      statusCode: resp.status,
-      headers: {
-        "Content-Type": resp.headers.get("content-type") || "application/json",
-        // match vault functions' permissive CORS (Shopify App Proxy will consume it)
-        "Access-Control-Allow-Origin": "*",
-        "Access-Control-Expose-Headers": "Content-Type",
-      },
-      body: text,
-    };
+      // ✅ ADD THIS - Log if Netlify function fails
+      if (!resp.ok && resp.status >= 500) {
+        const errorText = await resp.clone().text();
+        await errlog({
+          shop: shopFromQs,
+          route: `/engine-proxy → ${fnName}`,
+          status: resp.status,
+          message: `Netlify function ${fnName} failed`,
+          detail: errorText.slice(0, 500),
+          request_id,
+          code: 'E_DOWNSTREAM'
+        });
+      }
+
+      const text = await resp.text();
+      return {
+        statusCode: resp.status,
+        headers: {
+          "Content-Type": resp.headers.get("content-type") || "application/json",
+          // match vault functions' permissive CORS (Shopify App Proxy will consume it)
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Expose-Headers": "Content-Type",
+        },
+        body: text,
+      };
+    } catch (err) {
+      // ✅ ADD THIS - Log fetch failures
+      await errlog({
+        shop: shopFromQs,
+        route: `/engine-proxy → ${fnName}`,
+        status: 500,
+        message: `Failed to reach Netlify function ${fnName}`,
+        detail: err.message || String(err),
+        request_id,
+        code: 'E_FETCH_FAILED'
+      });
+      throw err;
+    }
   };
-    // Jobs interceptor (App Proxy → Netlify functions)
+
+  // Jobs interceptor (App Proxy → Netlify functions)
   if (suffix === "/v3/billing/status")    return await forwardToFunction("billing-status");
   if (suffix === "/v3/billing/subscribe") return await forwardToFunction("billing-subscribe");
   if (suffix === "/v3/job/start")  return await forwardToFunction("start");
@@ -135,44 +171,75 @@ export const handler = async (event) => {
   /* ──────────────────────────────────────────────────────────── */
 
   // 2) everything else → forward to n8n
-  const base = (process.env.N8N_ENGINE_BASE_URL || process.env.N8N_ENGINE_WEBHOOK_URL || "").replace(/\/$/, "");
-  if (!base) return json(500, { error: "missing N8N_ENGINE_BASE_URL" });
+  try {
+    const base = (process.env.N8N_ENGINE_BASE_URL || process.env.N8N_ENGINE_WEBHOOK_URL || "").replace(/\/$/, "");
+    if (!base) return json(500, { error: "missing N8N_ENGINE_BASE_URL" });
 
-  const qs = new URLSearchParams(url.searchParams);
-  qs.delete("signature");
-  const path = suffix === "/" ? "/run" : suffix;
-  const target = `${base}${path}${qs.toString() ? `?${qs}` : ""}`;
+    const qs = new URLSearchParams(url.searchParams);
+    qs.delete("signature");
+    const path = suffix === "/" ? "/run" : suffix;
+    const target = `${base}${path}${qs.toString() ? `?${qs}` : ""}`;
 
-  const method = event.httpMethod || "GET";
-  const needsBody = ["POST", "PUT", "PATCH"].includes(method);
-  const rawBody = event.isBase64Encoded
-    ? Buffer.from(event.body || "", "base64").toString("utf8")
-    : (event.body || "");
+    const method = event.httpMethod || "GET";
+    const needsBody = ["POST", "PUT", "PATCH"].includes(method);
+    const rawBody = event.isBase64Encoded
+      ? Buffer.from(event.body || "", "base64").toString("utf8")
+      : (event.body || "");
 
-  const resp = await fetch(target, {
-    method,
-    headers: {
-      "Content-Type":
-        event.headers?.["content-type"] ||
-        event.headers?.["Content-Type"] ||
-        "application/json",
-      "X-Channel": "shopify-proxy",
-      "X-Shop": url.searchParams.get("shop") || "",
-      "X-Logged-In-Customer-Id": url.searchParams.get("logged_in_customer_id") || "",
-      "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
-      "X-Seoboss-Ts": String(Math.floor(Date.now() / 1000)),
-    },
-    body: needsBody ? rawBody : undefined,
-  });
+    const resp = await fetch(target, {
+      method,
+      headers: {
+        "Content-Type":
+          event.headers?.["content-type"] ||
+          event.headers?.["Content-Type"] ||
+          "application/json",
+        "X-Channel": "shopify-proxy",
+        "X-Shop": shop,
+        "X-Logged-In-Customer-Id": url.searchParams.get("logged_in_customer_id") || "",
+        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
+        "X-Seoboss-Ts": String(Math.floor(Date.now() / 1000)),
+        // ✅ ADD THIS - Forward correlation ID to n8n
+        "X-Request-Id": request_id,
+      },
+      body: needsBody ? rawBody : undefined,
+    });
 
-  const text = await resp.text();
-  return {
-    statusCode: resp.status,
-    headers: {
-      "Content-Type": resp.headers.get("content-type") || "application/json",
-      "Access-Control-Allow-Origin": ORIGIN,
-      "Access-Control-Expose-Headers": "Content-Type",
-    },
-    body: text,
-  };
+    // ✅ ADD THIS - Log if n8n fails
+    if (!resp.ok && resp.status >= 500) {
+      const errorText = await resp.clone().text();
+      await errlog({
+        shop,
+        route: `/engine-proxy → n8n${path}`,
+        status: resp.status,
+        message: `n8n endpoint ${path} failed`,
+        detail: errorText.slice(0, 500),
+        request_id,
+        code: 'E_N8N_FAILED'
+      });
+    }
+
+    const text = await resp.text();
+    return {
+      statusCode: resp.status,
+      headers: {
+        "Content-Type": resp.headers.get("content-type") || "application/json",
+        "Access-Control-Allow-Origin": ORIGIN,
+        "Access-Control-Expose-Headers": "Content-Type",
+      },
+      body: text,
+    };
+  } catch (err) {
+    // ✅ ADD THIS - Log n8n fetch failures
+    await errlog({
+      shop,
+      route: '/engine-proxy → n8n',
+      status: 500,
+      message: 'Failed to reach n8n',
+      detail: err.message || String(err),
+      request_id,
+      code: 'E_N8N_UNREACHABLE'
+    });
+    
+    return json(502, { error: "n8n unreachable", detail: err.message });
+  }
 };
