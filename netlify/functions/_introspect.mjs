@@ -1,9 +1,7 @@
 // netlify/functions/_introspect.mjs
-import { json, CORS } from './_lib/_supabase.mjs';
-import { sb } from './_lib/_supabase.mjs';
+import { json, CORS, sb } from './_lib/_supabase.mjs';
 
-// tiny fetch with timeout
-async function ping(url, { method = 'GET', headers = {}, timeoutMs = 2500 } = {}) {
+async function ping(url, { method='GET', headers={}, timeoutMs=2500 } = {}) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort('timeout'), timeoutMs);
   const t0 = Date.now();
@@ -32,7 +30,6 @@ export default async (req) => {
   const origin = `${req.headers.get('x-forwarded-proto') || 'https'}://${req.headers.get('x-forwarded-host') || req.headers.get('host')}`;
   const nowIso = new Date().toISOString();
 
-  // Public, non-sensitive snapshot
   const base = {
     service: 'seoboss-relay',
     version: process.env.RELAY_VERSION || 'v3.2.1',
@@ -49,12 +46,9 @@ export default async (req) => {
     ],
   };
 
-  // Health pings (cheap, quick, no secrets returned)
-  const proxyAliveUrl = `${origin}/proxy/_alive`;
-  const vaultAliveUrl = `${origin}/.netlify/functions/vault-alive`;
   const [proxyHealth, vaultHealth] = await Promise.all([
-    ping(proxyAliveUrl),
-    ping(vaultAliveUrl),
+    ping(`${origin}/proxy/_alive`),
+    ping(`${origin}/.netlify/functions/vault-alive`),
   ]);
 
   const body = {
@@ -65,35 +59,29 @@ export default async (req) => {
     },
   };
 
-  // Admin-only extras (safe: no secrets echoed)
   if (admin) {
     try {
       const supa = sb();
-
-      // recent errors (last 1h)
-      const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const since = new Date(Date.now() - 60*60*1000).toISOString();
       const { count: errors_last_hour } = await supa
         .from('function_errors')
         .select('id', { count: 'exact', head: true })
         .gte('ts', since);
 
-      // optional: quick billing sanity for a shop if provided (?shop=...)
       const u = new URL(req.url);
       const shop = (u.searchParams.get('shop') || '').toLowerCase();
       let billing_probe = null;
       if (shop) {
-        // call the function directly (no App Proxy needed)
-        const statusUrl = `${origin}/.netlify/functions/billing-status?shop=${encodeURIComponent(shop)}`;
-        billing_probe = await ping(statusUrl);
+        billing_probe = await ping(`${origin}/.netlify/functions/billing-status?shop=${encodeURIComponent(shop)}`);
       }
 
       body.ops = {
         errors_last_hour: errors_last_hour ?? 0,
-        billing_probe: billing_probe, // includes ok/status/ms; only when ?shop= is passed
+        billing_probe,
         node: {
           pid: process.pid,
           v: process.versions,
-          rss_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+          rss_mb: Math.round(process.memoryUsage().rss/1024/1024),
         },
       };
     } catch (e) {
