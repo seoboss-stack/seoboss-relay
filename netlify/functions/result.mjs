@@ -1,9 +1,13 @@
 // netlify/functions/result.mjs
 import { sb, json, CORS } from './_lib/_supabase.mjs';
+import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'GET') return json({ error: 'GET only' }, 405);
+
+  // ✅ ADD THIS - Extract request_id early
+  const request_id = req.headers.get('x-request-id') || req.headers.get('X-Request-Id') || '';
 
   try {
     const { searchParams } = new URL(req.url);
@@ -26,7 +30,24 @@ export default async (req) => {
       .eq('shop', shop.toLowerCase())
       .single();
 
-    if (error || !data) return json({ error: 'Not found' }, 404);
+    // ✅ ADD THIS - Log DB query failures (but NOT 404s - those are expected)
+    if (error) {
+      // Supabase returns PGRST116 for "not found" - this is expected, don't log it
+      if (error.code !== 'PGRST116') {
+        await errlog({
+          shop: shop.toLowerCase(),
+          route: '/result',
+          status: 500,
+          message: 'Failed to query job status',
+          detail: `jobId: ${jobId}, error: ${error.message}`,
+          request_id,
+          code: 'E_DB_READ'
+        });
+      }
+      return json({ error: 'Not found' }, 404);
+    }
+
+    if (!data) return json({ error: 'Not found' }, 404);
 
     return json({
       jobId,
@@ -36,8 +57,23 @@ export default async (req) => {
       error: data.error_text ?? null,
       updatedAt: data.updated_at,
     });
+
   } catch (e) {
-    console.error('RESULT error:', e);
+    // ✅ REPLACE console.error - Use errlog
+    const { searchParams } = new URL(req.url);
+    const shop = searchParams.get('shop') || '';
+    const jobId = searchParams.get('jobId') || '';
+
+    await errlog({
+      shop: shop.toLowerCase(),
+      route: '/result',
+      status: 500,
+      message: 'Uncaught exception in result endpoint',
+      detail: `jobId: ${jobId}, error: ${e.stack || String(e)}`,
+      request_id,
+      code: 'E_EXCEPTION'
+    });
+
     return json({ error: 'internal', detail: String(e) }, 500);
   }
 };
