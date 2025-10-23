@@ -414,15 +414,38 @@
   // ============================================
   // 2. AUTHENTICATION HELPERS
   // ============================================
-  // IMPORTANT: This must match your n8n FORWARD_SECRET environment variable
-  const FORWARD_SECRET = 'G9dk82nN2mX7pQb4vT!sZy';
+  // IMPORTANT: These must match your Netlify environment variables
+  const FORWARD_SECRET = 'G9dk82nN2mX7pQb4vT!sZy';  // Must match FORWARD_SECRET in Netlify
+  const HMAC_KEY = 'SEOBOSSSECRET_2025';             // Must match PUBLIC_HMAC_KEY in Netlify
   
-  // Create headers for n8n authentication
-  function createAuthHeaders() {
+  // Canonicalize form data for HMAC signing
+  function canonicalForm(obj) {
+    const entries = Object.entries(obj || {})
+      .filter(([_, v]) => v !== undefined && v !== null && String(v).trim() !== '')
+      .map(([k, v]) => [String(k), String(v)]);
+    entries.sort((a, b) => a[0].localeCompare(b[0]));
+    return entries.map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+  }
+  
+  // Generate HMAC signature
+  async function hmacHex(secret, message) {
+    const enc = new TextEncoder();
+    const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
+    return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+  
+  // Create signed headers for relay authentication
+  async function createAuthHeaders(payload) {
+    const body = canonicalForm(payload);
     const timestamp = Math.floor(Date.now() / 1000).toString();
+    const hmac = await hmacHex(HMAC_KEY, body + '\n' + timestamp);
+    
     return {
       'X-SEOBOSS-FORWARD-SECRET': FORWARD_SECRET,
-      'X-Seoboss-Ts': timestamp
+      'X-Seoboss-Ts': timestamp,
+      'X-Seoboss-Hmac': hmac,
+      'X-Seoboss-Key-Id': 'global'
     };
   }
   
@@ -605,7 +628,12 @@
     el.installMsg.textContent = 'Adding to your theme...';
     
     try {
-      const authHeaders = createAuthHeaders();
+      const installPayload = {
+        client_id: client.id,
+        shop: client.shop_url
+      };
+      const authHeaders = await createAuthHeaders(installPayload);
+      
       const response = await fetch(installUrl, {
         method: 'POST',
         headers: {
@@ -613,10 +641,7 @@
           'Accept': 'application/json',
           ...authHeaders
         },
-        body: new URLSearchParams({
-          client_id: client.id,
-          shop: client.shop_url
-        })
+        body: new URLSearchParams(installPayload)
       });
       
       const data = await readJSON(response);
@@ -718,26 +743,18 @@
     el.result.textContent = isUpdate ? 'Saving preferences...' : 'Setting up your workspace...';
     
     try {
-      // Use authenticated fetch if embedded, regular fetch otherwise
-      let response;
-      if (isEmbedded && app) {
-        response = await authenticatedFetch(endpoint, {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
-      } else {
-        // Add auth headers for n8n
-        const authHeaders = createAuthHeaders();
-        response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json',
-            ...authHeaders
-          },
-          body: new URLSearchParams(payload)
-        });
-      }
+      // Add auth headers with HMAC signature
+      const authHeaders = await createAuthHeaders(payload);
+      
+      response = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Accept': 'application/json',
+          ...authHeaders
+        },
+        body: new URLSearchParams(payload)
+      });
       
       const data = await readJSON(response);
       
