@@ -5,30 +5,70 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SEOBoss Admin</title>
 
-  <!-- App Bridge (pinned) + frame bouncer -->
+  <!-- Single App Bridge include -->
   <script src="https://unpkg.com/@shopify/app-bridge@3.7.6"></script>
+  <script src="https://unpkg.com/@shopify/app-bridge-utils@3.7.6"></script>
+
   <script>
   (function(){
-    const qs = new URLSearchParams(location.search);
-    const host = qs.get('host');
-    if (!host) return;                  // only on Admin loads
-    if (window.top !== window.self) return; // already framed
+    // Read host/shop from query (Shopify adds these when opening from Admin)
+    const qs   = new URLSearchParams(location.search);
+    const host = qs.get('host') || '';
+    const shop = (qs.get('shop') || '').toLowerCase();
 
-    try {
-      const app = window.ShopifyAppBridge.createApp({
-        apiKey: '5654f5c575452aefdca2592d2a2d1f3d', // your Client ID (public)
-        host
-      });
-      const Redirect = window.ShopifyAppBridge.actions.Redirect;
-      Redirect.create(app).dispatch(Redirect.Action.REMOTE, location.href);
-    } catch(e) {
-      console.warn('[SEOBoss] App Bridge redirect failed:', e);
+    // 1) If NOT embedded but we DO have a host → bounce into the Admin iframe
+    if (host && window.top === window.self) {
+      try {
+        const app = window.ShopifyAppBridge.createApp({
+          apiKey: '5654f5c575452aefdca2592d2a2d1f3d', // your public Client ID
+          host
+        });
+        const Redirect = window.ShopifyAppBridge.actions.Redirect;
+        Redirect.create(app).dispatch(Redirect.Action.REMOTE, location.href);
+        // return; // (no return needed; Shopify will reframe us)
+      } catch (e) {
+        console.warn('[SEOBoss] App Bridge reframe failed', e);
+      }
     }
+
+    // 2) If we ARE embedded (inside an iframe with host), expose an auth’d fetch helper
+    try {
+      if (host && window.top !== window.self) {
+        const app = window.ShopifyAppBridge.createApp({
+          apiKey: '5654f5c575452aefdca2592d2a2d1f3d',
+          host
+        });
+        // Make getSessionToken available
+        const { getSessionToken } = window.appBridgeUtils;
+
+        window.SEO_BOSS_FETCH = async (url, payload) => {
+          const token = await getSessionToken(app);
+          return fetch(url, {
+            method: 'POST',
+            headers: {
+              'Authorization': `Bearer ${token}`,
+              'Content-Type': 'application/json',
+              'Accept': 'application/json'
+            },
+            body: JSON.stringify(payload || {})
+          });
+        };
+
+        // Mark embedded mode for your page JS
+        window.__SEOBOSS_EMBEDDED__ = true;
+      }
+    } catch (e) {
+      console.warn('[SEOBoss] Embedded fetch init failed', e);
+    }
+
+    // 3) Stash shop for later (your script can read it)
+    if (shop) window.__SEOBOSS_SHOP__ = shop;
   })();
   </script>
 
   <style>html,body{background:#0A0F0D;color:#fff;margin:0}</style>
 </head>
+
 <body>
 
 <!-- Your onboarding UI -->
@@ -338,7 +378,7 @@
     try{
       const r = await adminPost(url, { client_id: client.id });
       const d = await readJSON(r);
-      if(!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
+      if(!r.ok || data.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
 
       const sample = Array.isArray(d.sample) ? d.sample.slice(0,10) : [];
       const parts = [
