@@ -1,0 +1,35 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SEOBoss Admin</title>
+  <script src="https://unpkg.com/@shopify/app-bridge@latest"></script>
+  <script type="module">
+    import { getSessionToken } from "https://unpkg.com/@shopify/app-bridge-utils@latest/dist/index.js";
+    const host = new URLSearchParams(location.search).get("host");
+    const app  = window.appBridge.createApp({ apiKey: "<PUBLIC_API_KEY>", host });
+
+    // Authenticated fetch for Admin endpoints
+    window.SEO_BOSS_FETCH = async (url, payload) => {
+      const token = await getSessionToken(app);
+      return fetch(url, {
+        method: "POST",
+        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify(payload || {})
+      });
+    };
+  </script>
+  <style>html,body{background:#0A0F0D;color:#fff;margin:0}</style>
+</head>
+<body>
+  <div id="seoboss-onboarding"
+       data-onboard-submit="/seoboss/api/onboarding/submit"
+       data-update-profile="/seoboss/api/client/profile"
+       data-engine-install="/seoboss/api/engine/install"
+       data-dev-mode="0"></div>
+
+  <!-- load your existing onboarding JS (bundle or inline) -->
+  <script src="/assets/onboarding.bundle.js"></script>
+</body>
+</html>
