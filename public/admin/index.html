@@ -671,13 +671,19 @@
   // Import articles button
   el.importArticlesBtn?.addEventListener('click', async () => {
     const client = store.read();
+    console.log('[SEOBoss] Import clicked, client data:', client);
+    
     if (!client || !client.id) {
+      console.warn('[SEOBoss] Import blocked - no client ID found');
       el.importMsg.textContent = 'Please connect your store first';
+      el.importMsg.style.color = '#ff9b9b';
       return;
     }
     
+    console.log('[SEOBoss] Starting import for client:', client.id);
     setBusy(el.importArticlesBtn, true, 'Fetching...');
     el.importMsg.textContent = 'Importing your blog posts...';
+    el.importMsg.style.color = '';
     
     try {
       // This would call your import endpoint
@@ -771,22 +777,36 @@
       
       const data = await readJSON(response);
       
+      // Debug: Log the full response to see what fields we're getting
+      console.log('[SEOBoss] Backend response:', data);
+      
       if (!response.ok || data.ok === false) {
         throw new Error(data?.message || data?.raw || response.statusText || 'Request failed');
       }
       
+      // Extract client ID - try different possible field names
+      const clientId = data.client_id || data.clientId || data.id || existingClient?.id || '';
+      
+      console.log('[SEOBoss] Extracted client ID:', clientId);
+      
       // Save client profile
       const profile = {
-        id: data.client_id || existingClient?.id || '',
-        shop_url: data.shop_url || shopInput,
+        id: clientId,
+        shop_url: data.shop_url || data.shop || shopInput,
         default_blog_id: data.default_blog_id || defaultBlogId || '',
         language: defaultLanguage,
         tone, niche, seed_keywords: seedKeywords, target_audience: targetAudience,
         ...(data.sheet_url ? { sheet_url: data.sheet_url } : {})
       };
       
+      console.log('[SEOBoss] Saving profile to localStorage:', profile);
+      
       store.save(profile);
-      if (profile.id) paintClientId(profile.id);
+      if (profile.id) {
+        paintClientId(profile.id);
+      } else {
+        console.warn('[SEOBoss] No client ID to display!');
+      }
       
       // Update UI
       el.savedBadge.style.display = 'flex';
@@ -805,16 +825,22 @@
         });
         if (data.default_blog_id) el.blogSelect.value = String(data.default_blog_id);
         el.blogRow.style.display = 'block';
+      } else if (profile.id || profile.shop_url) {
+        // Auto-discover blogs if not provided
+        console.log('[SEOBoss] No blogs in response, will auto-discover');
+        // Could call autoFetchBlogs() here if implemented
       }
       
-      // Show success message
+      // Show success message with more details
       if (isUpdate) {
         el.result.innerHTML = '<strong>✅ Preferences saved successfully!</strong>';
       } else {
         el.result.innerHTML = `
           <strong>${data.message || '✅ Successfully connected!'}</strong><br>
-          Client ID: <code>${profile.id || '—'}</code><br>
-          Shop: <code>${profile.shop_url}</code>
+          ${profile.id ? `Client ID: <code>${profile.id}</code><br>` : ''}
+          Shop: <code>${profile.shop_url}</code><br>
+          ${data.status ? `Status: <code>${data.status}</code><br>` : ''}
+          ${data.counts?.blogs ? `Blogs: <code>${data.counts.blogs}</code>` : ''}
         `;
       }
       
@@ -840,6 +866,40 @@
       setBusy(el.onboardBtn, false, '🔌 Connect');
     }
   });
+  
+  // Check for existing client on page load
+  (function checkExistingClient() {
+    const client = store.read();
+    console.log('[SEOBoss] Page load - checking for existing client:', client);
+    
+    if (client && client.id) {
+      console.log('[SEOBoss] Found existing client, updating UI');
+      paintClientId(client.id);
+      el.savedBadge.style.display = 'flex';
+      el.savedSummary.textContent = `${client.id} · ${client.shop_url || '—'} · ${client.language || 'en'}`;
+      statusDot.style.background = 'var(--mint)';
+      el.statusText.textContent = 'Connected';
+      
+      // Prefill form fields
+      if (client.shop_url) el.shopInput.value = client.shop_url;
+      if (client.language) el.defaultLanguage.value = client.language;
+      if (client.tone) el.tone.value = client.tone;
+      if (client.niche) el.niche.value = client.niche;
+      if (client.seed_keywords) el.seedKeywords.value = client.seed_keywords;
+      if (client.target_audience) el.targetAudience.value = client.target_audience;
+      
+      // Show appropriate cards
+      el.interlinkingCard.style.display = 'block';
+      showInstallCardIfReady();
+      
+      if (client.sheet_url) {
+        el.openSheetBtn.href = client.sheet_url;
+        el.engineCard.style.display = 'block';
+      }
+    } else {
+      console.log('[SEOBoss] No existing client found');
+    }
+  })();
   
   console.log('[SEOBoss] Onboarding page ready');
   
