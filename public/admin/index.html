@@ -756,7 +756,7 @@
       const hmac = await hmacHex(HMAC_KEY, body + '\n' + timestamp);
       
       // Send the same canonical form body that was signed
-      response = await fetch(endpoint, {
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
