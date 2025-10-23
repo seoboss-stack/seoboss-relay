@@ -23,11 +23,592 @@
   <style>html,body{background:#0A0F0D;color:#fff;margin:0}</style>
 </head>
 <body>
-  <div id="seoboss-onboarding"
-       data-onboard-submit="/seoboss/api/onboarding/submit"
-       data-update-profile="/seoboss/api/client/profile"
-       data-engine-install="/seoboss/api/engine/install"
-       data-dev-mode="0"></div>
+  <!-- SEOBoss — Connect / Save Preferences + Import Existing Posts + Install Engine (Admin-safe) -->
+<div id="seoboss-onboarding"
+     data-onboard-submit="https://hooks.seoboss.com/seoboss/api/onboarding/submit"
+     data-onboard-activate="https://seoboss.com/pages/connect"
+     data-onboard-resend="https://hooks.seoboss.com/seoboss/api/onboarding/resend"
+     data-update-profile="https://hooks.seoboss.com/seoboss/api/client/profile"
+     data-engine-install="https://hooks.seoboss.com/seoboss/api/engine/install"
+     data-dev-mode="0">
+  <div class="wrap">
+    <div class="panel">
+      <div class="head">
+        <div class="status"><span class="dot"></span> Ready to connect</div>
+        <small id="clientIdBadge" style="display:none;color:#a0ffd7">
+          Client: <code id="clientIdDisplay">—</code>
+        </small>
+        <h2>👑 SEOBoss — Connect Your Store</h2>
+        <p class="sub">We’ll discover your blogs and set up your workspace. No admin token required.</p>
+      </div>
+
+      <div id="onboardWrap">
+        <form id="bossForm" novalidate>
+          <input id="clientIdHidden" type="hidden" value="">
+
+          <!-- Step 1 -->
+          <div class="row two">
+            <div>
+              <label>Shopify Store (domain only)</label>
+              <input id="shopInput" placeholder="yourstore.myshopify.com" required>
+              <small>No https:// — just the myshopify.com domain.</small>
+            </div>
+            <!-- REMOVED: tokenRow (no longer needed) -->
+          </div>
+
+          <!-- Step 2 -->
+          <div class="row two">
+            <div>
+              <label>Language</label>
+              <input id="defaultLanguage" placeholder="en" value="en" required>
+            </div>
+            <div>
+              <label>Contact Email</label>
+              <input id="contactEmail" type="email" placeholder="owner@example.com" required>
+            </div>
+          </div>
+
+          <div class="row two">
+            <div>
+              <label>Tone</label>
+              <input id="toneInput" placeholder="Helpful, expert, no hype">
+            </div>
+            <div>
+              <label>Niche</label>
+              <input id="nicheInput" placeholder="(e.g.) vocal health; natural energy drinks">
+            </div>
+          </div>
+
+          <div class="row two">
+            <div>
+              <label>Seed keywords (comma-separated)</label>
+              <textarea id="seedKeywords" rows="3" placeholder="natural energy drink, manuka honey beverage, hydration energy"></textarea>
+            </div>
+            <div>
+              <label>Target audience</label>
+              <textarea id="targetAudience" rows="3" placeholder="Adults 45+; singers; wellness shoppers"></textarea>
+            </div>
+          </div>
+
+          <!-- Default blog (populated via API) -->
+          <div id="blogRow" class="row" style="display:none">
+            <div>
+              <label>Default blog</label>
+              <select id="blogSelect"></select>
+            </div>
+          </div>
+
+          <div class="actions">
+            <button id="onboardBtn" type="submit" class="btn primary big">🔌 Connect</button>
+          </div>
+
+          <div id="result" class="card" style="display:none" aria-live="polite"></div>
+        </form>
+
+        <!-- Saved profile -->
+        <div id="savedBadge" class="saved" style="display:none">
+          <span>✅ Preferences saved</span>
+          <code id="savedSummary"></code>
+        </div>
+
+        <!-- Interlinking import -->
+        <div id="interlinkingCard" class="card" style="display:none">
+          <div style="font-weight:800; margin-bottom:.4rem;">Interlinking: fetch your existing posts</div>
+          <p style="margin:.2rem 0 .8rem">
+            Import your current blog posts into your workspace. We’ll keep them updated, so your internal links and topic clusters stay fresh.
+          </p>
+          <div class="actions">
+            <button id="importArticlesBtn" class="btn outline">Fetch existing posts</button>
+          </div>
+          <small id="importMsg" class="msg"></small>
+          <div id="importPreview" style="margin-top:.6rem"></div>
+        </div>
+
+        <!-- Try the engine (workspace sheet) -->
+        <div id="engineCard" class="card" style="display:none">
+          <div style="font-weight:800; margin-bottom:.4rem;">Try your content engine</div>
+          <p style="margin:.2rem 0 .8rem">
+            Open your workspace to generate briefs, outlines, and internal links from your seed keywords.
+          </p>
+          <div class="actions">
+            <a id="openSheetBtn" href="#" target="_blank" rel="noopener" class="btn primary">🔗 Open your workspace</a>
+          </div>
+          <small id="engineMsg" class="msg"></small>
+        </div>
+
+        <!-- Install engine on your store -->
+        <div id="installCard" class="card" style="display:none">
+          <div style="font-weight:800; margin-bottom:.4rem;">Install your engine on your store</div>
+          <p style="margin:.2rem 0 .8rem">
+            Add the console to your theme (automatic), or copy a snippet to embed on any page. It’s linked to your client ID.
+          </p>
+          <div class="actions">
+            <button id="installThemeBtn" class="btn primary">⚙️ Add to Theme (auto)</button>
+            <button id="copySnippetBtn" class="btn">📋 Copy embed snippet</button>
+            <a id="openConsoleBtn" class="btn outline" target="_blank" rel="noopener">🔎 Open console page</a>
+          </div>
+          <details id="snippetBox" style="margin-top:.6rem">
+            <summary>Show embed snippet</summary>
+            <textarea id="embedSnippet" rows="6" readonly style="width:100%; margin-top:.4rem"></textarea>
+            <small>Paste into a Liquid section or page. It will use your app proxy and your client ID.</small>
+          </details>
+          <small id="installMsg" class="msg"></small>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+  #seoboss-onboarding { --mint:#00f5d4; --blue:#00bbf9; --ink:#e0ffe9; --bgA:#0f0c29; --bgB:#302b63; --bgC:#24243e; }
+  #seoboss-onboarding { background:linear-gradient(270deg,var(--bgA),var(--bgB),var(--bgC)); background-size:600% 600%; animation:soGrad 20s ease infinite; color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
+  @keyframes soGrad{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
+  .wrap{ max-width:980px; margin:0 auto; padding:1.2rem }
+  .panel{ margin:1.4rem auto; padding:1.4rem; border-radius:18px; background:linear-gradient(135deg,var(--bgA),var(--bgB) 60%,var(--bgA)); box-shadow:0 0 36px rgba(0,245,212,.22) }
+  .head h2{ margin:.2rem 0 .3rem; color:var(--mint); text-shadow:0 0 10px rgba(0,255,200,.6) }
+  .head .sub{ color:#cfefff }
+  .status{ font-weight:700; margin-bottom:.4rem }
+  .dot{ width:12px; height:12px; border-radius:50%; background:var(--mint); display:inline-block; margin-right:8px; box-shadow:0 0 12px rgba(0,255,200,.8); animation:pulse 1.8s infinite }
+  @keyframes pulse{0%,100%{transform:scale(.9)}50%{transform:scale(1.1)}}
+  label{ font-weight:800; color:#eafff7 } small{ color:#a0ffd7 }
+  input,select,textarea{ width:100%; padding:0.9rem 1rem; border-radius:12px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:#fff; box-sizing:border-box }
+  textarea{ min-height:50px; resize:vertical }
+  .row{ display:flex; flex-direction:column; gap:.6rem; background:rgba(255,255,255,.06); padding:1rem; border:1px solid rgba(255,255,255,.09); border-radius:12px; margin:.8rem 0 }
+  .row.two{ display:grid; grid-template-columns:1fr 1fr; gap:1rem }
+  .actions{ display:flex; gap:.6rem; margin-top:.4rem }
+  .btn{ padding:.9rem 1.1rem; border-radius:12px; font-weight:900; cursor:pointer; border:1px solid rgba(255,255,255,.14); color:#eafff7; background:rgba(255,255,255,.06); text-decoration:none; display:inline-block }
+  .btn.primary{ background:linear-gradient(90deg,var(--mint),var(--blue)); color:#062621; border:none; box-shadow:0 0 16px rgba(0,255,200,.35) }
+  .card{ margin:1rem 0; padding:1rem; border-radius:12px; background:rgba(255,255,255,.08); color:#e9fbff; box-shadow:0 0 20px rgba(0,255,200,.24) }
+  .saved{ display:flex; flex-direction:column; align-items:flex-start; gap:.6rem; color:#b9ffe9 }
+  code{ background:rgba(255,255,255,.08); padding:.2rem .4rem; border-radius:6px; border:1px solid rgba(255,255,255,.14) }
+  #importPreview details { margin-top:.4rem }
+  #importPreview ul { margin:.4rem 0; padding-left:1.1rem }
+  @media (max-width:820px){ .row.two{ grid-template-columns:1fr } .wrap{ padding:1rem } }
+</style>
+
+<script>
+(function(){
+  const rootEl = document.getElementById('seoboss-onboarding');
+
+  // ===== Config =====
+  const DEV = (rootEl.dataset.devMode || '0') === '1' || new URLSearchParams(location.search).has('dev');
+  const AUTO_DISCOVER_BLOGS = true;
+
+  // ---- Admin fetch shim: uses App Bridge if available; falls back to form POST outside Admin
+  async function adminPost(url, params = {}) {
+    if (typeof window.SEO_BOSS_FETCH === 'function') {
+      // Send JSON when embedded in Admin
+      return window.SEO_BOSS_FETCH(url, params);
+    }
+    // Legacy fallback (non-embedded/dev): x-www-form-urlencoded
+    const body = new URLSearchParams(Object.entries(params).filter(([_,v]) => v!=null)).toString();
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
+      body
+    });
+  }
+
+  // ===== Helpers =====
+  const $ = (s) => rootEl.querySelector(s);
+  const result = $('#result');
+  const savedBadge = $('#savedBadge');
+  const savedSummary = $('#savedSummary');
+  const statusDot = rootEl.querySelector('.dot');
+  const clientIdBadge = $('#clientIdBadge');
+  const clientIdDisplay = $('#clientIdDisplay');
+  const clientIdHidden = $('#clientIdHidden');
+  const interlinking = $('#interlinkingCard');
+  const importBtn = $('#importArticlesBtn');
+  const importMsg = $('#importMsg');
+  const importPreview = $('#importPreview');
+  const engineCard = $('#engineCard');
+  const openSheetBtn = $('#openSheetBtn');
+
+  // NEW — install card elements
+  const installCard = $('#installCard');
+  const installBtn = $('#installThemeBtn');
+  const copySnippetBtn = $('#copySnippetBtn');
+  const snippetArea = $('#embedSnippet');
+  const openConsoleBtn = $('#openConsoleBtn');
+  const installMsg = $('#installMsg');
+
+  const el = {
+    shopInput: $('#shopInput'),
+    defaultLanguage: $('#defaultLanguage'),
+    contactEmail: $('#contactEmail'),
+    tone: $('#toneInput'),
+    niche: $('#nicheInput'),
+    seedKeywords: $('#seedKeywords'),
+    targetAudience: $('#targetAudience'),
+    blogRow: $('#blogRow'),
+    blogSelect: $('#blogSelect'),
+    onboardBtn: $('#onboardBtn'),
+  };
+
+  function setBusy(btn, busy, text){
+    if(!btn) return;
+    if(busy){ btn.dataset.idle = btn.textContent; btn.disabled = true; btn.textContent = text || 'Working…'; }
+    else { btn.disabled = false; btn.textContent = btn.dataset.idle || btn.textContent; }
+  }
+  const readJSON = async (r)=>{ const t = await r.text(); try { return t ? JSON.parse(t) : {}; } catch { return { raw: t }; } };
+  function maybe(v){ v = (v ?? '').toString().trim(); return v ? v : undefined; }
+
+  // local cache
+  const store = {
+    save(c){ try{ localStorage.setItem('seoboss:client', JSON.stringify(c)); }catch{} },
+    read(){ try{ return JSON.parse(localStorage.getItem('seoboss:client')||'{}'); }catch{ return {}; } }
+  };
+  function paintClientId(id){ if(!id) return; clientIdHidden.value=id; clientIdDisplay.textContent=id; clientIdBadge.style.display=''; }
+
+  // ===== Endpoints bridge =====
+  (function initBridge(root, el){
+    const ds = el?.dataset || {};
+    const req = (k)=> (ds[k] && ds[k].trim()) || '';
+    const endpoints = {
+      onboardSubmit:   req('onboardSubmit'),
+      updateProfile:   req('updateProfile'),
+      engineInstall:   req('engineInstall'),
+    };
+    // base from /api/onboarding/submit
+    const base = endpoints.onboardSubmit ? endpoints.onboardSubmit.replace(/\/api\/onboarding\/submit.*$/,'') : '';
+
+    root.SEO_BOSS = root.SEO_BOSS || {};
+    root.SEO_BOSS.onboardSubmit  = ()=> endpoints.onboardSubmit;
+    root.SEO_BOSS.updateProfile  = ()=> endpoints.updateProfile;
+    root.SEO_BOSS.engineInstall  = ()=> endpoints.engineInstall;
+    root.SEO_BOSS.fetchBlogs     = ()=> 'https://hooks.seoboss.com/.netlify/functions/list-blogs';
+    root.SEO_BOSS.importArticles = ()=> base ? (base + '/api/shop/import-articles') : '';
+  })(window, rootEl);
+
+  // ===== Install detect & prefill =====
+  let INSTALLED_MODE = false;
+  let SHOP_FROM_URL = '';
+  (()=>{
+    const qs = new URLSearchParams(location.search);
+    SHOP_FROM_URL = (qs.get('shop') || qs.get('shopify') || qs.get('shopify_domain') || '').toLowerCase();
+
+    // Consider embedded Admin as installed mode automatically
+    INSTALLED_MODE = !!window.SEO_BOSS_FETCH || qs.get('installed') === '1';
+
+    const CID_FROM_URL = (qs.get('client_id') || '').trim();
+    if (CID_FROM_URL) { store.save({ ...(store.read()||{}), id: CID_FROM_URL, shop_url: SHOP_FROM_URL || (store.read().shop_url||'') }); paintClientId(CID_FROM_URL); }
+    else { const cached = store.read(); if (cached.id) paintClientId(cached.id); }
+
+    if (INSTALLED_MODE) {
+      // UI copy for embedded
+      el.onboardBtn.textContent = 'Save Preferences';
+      const sub = rootEl.querySelector('.head .sub');
+      if (sub) sub.textContent = 'Connected via the Shopify app — no admin token needed.';
+      if (!SHOP_FROM_URL) {
+        const cachedShop = (store.read()?.shop_url || '').toLowerCase();
+        if (cachedShop) SHOP_FROM_URL = cachedShop;
+      }
+      if (SHOP_FROM_URL) { el.shopInput.value = SHOP_FROM_URL; el.shopInput.disabled = true; }
+      if (AUTO_DISCOVER_BLOGS && SHOP_FROM_URL) autoFetchBlogs();
+      interlinking.style.display = ''; // show interlinking card after install
+      // if we already know client + shop, expose install card
+      showInstallCardIfReady();
+    }
+  })();
+
+  // ===== Blog loader (GET only) =====
+  async function autoFetchBlogs(){
+    const url = window.SEO_BOSS.fetchBlogs();
+    const shop = (SHOP_FROM_URL || store.read()?.shop_url || '').trim();
+    if (!url || !shop) return;
+    try{
+      const rsp = await fetch(`${url}?shop=${encodeURIComponent(shop)}`);
+      const d = await rsp.json();
+      if (rsp.ok && d.ok && Array.isArray(d.blogs)) {
+        const sel = el.blogSelect; sel.innerHTML = '';
+        d.blogs.forEach(b=>{
+          const opt = document.createElement('option');
+          opt.value = String(b.id);
+          opt.textContent = b.title || b.handle || ('Blog ' + b.id);
+          sel.appendChild(opt);
+        });
+        if (d.default_blog_id) sel.value = String(d.default_blog_id);
+        el.blogRow.style.display = '';
+        if (d.client_id) { store.save({ ...(store.read()||{}), id: d.client_id, shop_url: shop }); paintClientId(d.client_id); }
+      }
+    }catch{/* silent */}
+  }
+
+  // ===== Import existing posts (interlinking) =====
+  importBtn?.addEventListener('click', async ()=>{
+    const url = window.SEO_BOSS.importArticles();
+    const client = store.read() || {};
+    if(!url){ importMsg.textContent = 'Import endpoint not set.'; return; }
+    if(!client.id){ importMsg.textContent = 'Connect first.'; return; }
+
+    importMsg.textContent = 'Starting import…';
+    importPreview.innerHTML = '';
+    setBusy(importBtn, true, 'Importing…');
+    try{
+      const r = await adminPost(url, { client_id: client.id });
+      const d = await readJSON(r);
+      if(!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
+
+      // summary + preview (show up to 10)
+      const sample = Array.isArray(d.sample) ? d.sample.slice(0,10) : [];
+      const parts = [
+        `Imported ${d.imported ?? '—'} posts`,
+        d.deduped ? `(deduped ${d.deduped})` : '',
+        d.sheet_url ? ` · <a href="${d.sheet_url}" target="_blank" rel="noopener">Open sheet</a>` : ''
+      ].filter(Boolean).join(' ');
+      importMsg.innerHTML = parts;
+
+      if (sample.length) {
+        const details = document.createElement('details');
+        const summary = document.createElement('summary');
+        summary.textContent = `Preview ${sample.length} recent posts`;
+        details.appendChild(summary);
+
+        const ul = document.createElement('ul');
+        sample.forEach(p=>{
+          const li = document.createElement('li');
+          const when = p.updated_at ? new Date(p.updated_at).toLocaleString() : '';
+          li.innerHTML = `<a href="${p.url}" target="_blank" rel="noopener">${p.title || p.url}</a> <small style="opacity:.7">— ${when}</small>`;
+          ul.appendChild(li);
+        });
+        details.appendChild(ul);
+        importPreview.appendChild(details);
+      }
+
+      if (d.sheet_url) {
+        openSheetBtn.href = d.sheet_url;
+        engineCard.style.display = '';
+      }
+
+      // expose install card after import (we now definitely have client+shop in store)
+      showInstallCardIfReady();
+
+    }catch(err){
+      importMsg.textContent = 'Could not start import: ' + (err.message || 'Unknown');
+    }finally{
+      setBusy(importBtn, false);
+    }
+  });
+
+  // ===== Install card logic =====
+  function showInstallCardIfReady(){
+    const client = store.read() || {};
+    const shop = (client.shop_url || '').toLowerCase();
+    if (!client.id || !shop) return;
+
+    // App Proxy console URL (fallback to hidden page if returned by backend)
+    const proxyUrl = `https://${shop}/apps/seoboss/console?client_id=${encodeURIComponent(client.id)}`;
+    if (openConsoleBtn) openConsoleBtn.href = proxyUrl;
+
+    // Embeddable snippet
+    const embed = [
+      `<div id="seoboss-console"`,
+      `     data-client-id="${client.id}"`,
+      `     data-shop="${shop}"></div>`,
+      `<script async src="https://seoboss.com/engine/widget.js"><\/script>`
+    ].join('\n');
+    if (snippetArea) snippetArea.value = embed;
+
+    installCard.style.display = '';
+  }
+
+  installBtn?.addEventListener('click', async ()=>{
+    const url = window.SEO_BOSS.engineInstall();
+    const client = store.read() || {};
+    if (!url) { installMsg.textContent = 'Install endpoint not set.'; return; }
+    if (!client.id || !client.shop_url) { installMsg.textContent = 'Connect first.'; return; }
+
+    setBusy(installBtn, true, 'Installing…'); installMsg.textContent = '';
+    try{
+      const r = await adminPost(url, { client_id: client.id, shop: client.shop_url });
+      const d = await readJSON(r);
+      if (!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
+      const pageUrl = d.page_url || openConsoleBtn?.href || `https://${client.shop_url}/pages/seoboss-console`;
+      installMsg.innerHTML = `Installed. <a href="${pageUrl}" target="_blank" rel="noopener">Open page</a>`;
+      if (openConsoleBtn) openConsoleBtn.href = pageUrl;
+    }catch(err){
+      installMsg.textContent = err.message || 'Install failed';
+    }finally{
+      setBusy(installBtn, false); installBtn.textContent = '⚙️ Add to Theme (auto)';
+    }
+  });
+
+  copySnippetBtn?.addEventListener('click', ()=>{
+    if (!snippetArea) return;
+    snippetArea.select(); document.execCommand('copy');
+    copySnippetBtn.textContent = 'Copied!';
+    setTimeout(()=> copySnippetBtn.textContent = '📋 Copy embed snippet', 1200);
+  });
+
+  // ===== Form submit (Connect or Save Prefs) =====
+  $('#bossForm')?.addEventListener('submit', async (e)=>{
+    e.preventDefault();
+    const submitURL = window.SEO_BOSS.onboardSubmit();
+    const updateURL = window.SEO_BOSS.updateProfile();
+
+    const contact_email    = (el.contactEmail.value||'').trim();
+    const default_language = (el.defaultLanguage.value||'en').trim().toLowerCase();
+    const shop_input       = (el.shopInput.value||'').trim().toLowerCase();
+    const tone             = (el.tone.value||'').trim();
+    const niche            = (el.niche.value||'').trim();
+    const seed_keywords    = (el.seedKeywords.value||'').trim();
+    const target_audience  = (el.targetAudience.value||'').trim();
+    const default_blog_id  = (el.blogSelect?.value || '').trim();
+
+    if(!shop_input || !contact_email){
+      result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Please complete required fields.</span>'; return;
+    }
+
+    // Consider embedded Admin as installed
+    const installed = !!window.SEO_BOSS_FETCH || location.search.includes('installed=1');
+
+    // ===== Installed mode → Save Preferences =====
+    if (installed) {
+      if(!updateURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Profile endpoint not set.</span>'; return; }
+
+      const client = store.read() || {};
+      if (client.id) paintClientId(client.id);
+
+      const patch = {
+        client_id: client.id || clientIdHidden.value || '',
+        shop: client.shop_url || shop_input,
+        contact_email:    maybe(contact_email),
+        default_language: maybe(default_language),
+        tone:             maybe(tone),
+        niche:            maybe(niche),
+        seed_keywords:    maybe(seed_keywords),
+        target_audience:  maybe(target_audience),
+        ...(default_blog_id ? { default_blog_id } : {}),
+        idem: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()))
+      };
+
+      setBusy(el.onboardBtn,true,'Saving…');
+      result.style.display='block'; result.textContent = 'Saving your preferences…';
+
+      try{
+        const r = await adminPost(updateURL, patch);
+        const data = await readJSON(r);
+        if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Save failed');
+
+        const updated = { ...client,
+          id: client.id || data.client_id || '',
+          shop_url: client.shop_url || shop_input,
+          language: default_language,
+          ...(tone ? { tone } : {}),
+          ...(niche ? { niche } : {}),
+          ...(seed_keywords ? { seed_keywords } : {}),
+          ...(target_audience ? { target_audience } : {}),
+          ...(default_blog_id ? { default_blog_id } : {})
+        };
+        store.save(updated); if (updated.id) paintClientId(updated.id);
+
+        savedBadge.style.display='flex';
+        savedSummary.textContent = `${updated.id || 'cli_…'} · ${updated.shop_url} · ${updated.language}`;
+        statusDot.style.background = 'var(--mint)';
+        result.innerHTML = '<strong>Preferences saved.</strong>';
+
+        // Blog picker from backend, else auto
+        if (Array.isArray(data.blogs_list) && data.blogs_list.length) {
+          const sel = el.blogSelect; sel.innerHTML = '';
+          data.blogs_list.forEach(b=>{
+            const opt = document.createElement('option');
+            opt.value = String(b.id);
+            opt.textContent = b.title || b.handle || ('Blog ' + b.id);
+            sel.appendChild(opt);
+          });
+          if (data.default_blog_id) sel.value = String(data.default_blog_id);
+          el.blogRow.style.display = '';
+        } else {
+          autoFetchBlogs();
+        }
+
+        // Workspace link
+        if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
+        else if (client.sheet_url) { openSheetBtn.href = client.sheet_url; engineCard.style.display = ''; }
+
+        // Now that we know client + shop, reveal install
+        showInstallCardIfReady();
+
+      }catch(err){
+        result.innerHTML = `<span style="color:#ff9b9b">❌ ${err.message || 'Failed to save'}</span>`;
+        statusDot.style.background = '#ff8b8b'; statusDot.style.boxShadow = '0 0 10px rgba(255,100,100,.9)';
+      }finally{
+        setBusy(el.onboardBtn,false);
+      }
+      return;
+    }
+
+    // ===== Non-installed path → (optional legacy) create onboarding WITHOUT asking for token =====
+    if(!submitURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Onboarding submit endpoint not set.</span>'; return; }
+
+    setBusy(el.onboardBtn,true,'Connecting…');
+    result.style.display='block'; result.textContent = 'Setting up your engine… this can take up to a minute.';
+
+    try{
+      const payload = {
+        client_name: '',
+        contact_email,
+        default_language,
+        shop_input,
+        tone, niche, seed_keywords, target_audience
+      };
+      const r = await adminPost(submitURL, payload);
+      const data = await readJSON(r);
+      if(!r.ok || d.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Submit error');
+
+      const profile = {
+        id: data.client_id || (store.read().id || ''),
+        shop_url: data.shop_url || shop_input,
+        default_blog_id: data.default_blog_id || '',
+        language: default_language,
+        tone, niche, seed_keywords, target_audience,
+        ...(data.sheet_url ? { sheet_url: data.sheet_url } : {})
+      };
+      store.save(profile); if (profile.id) paintClientId(profile.id);
+
+      savedBadge.style.display='flex';
+      savedSummary.textContent = `${profile.id || 'cli_…'} · ${profile.shop_url} · ${profile.language}`;
+      statusDot.style.background = 'var(--mint)';
+
+      if (Array.isArray(data.blogs_list) && data.blogs_list.length) {
+        const sel = el.blogSelect; sel.innerHTML = '';
+        data.blogs_list.forEach(b=>{
+          const opt = document.createElement('option');
+          opt.value = String(b.id);
+          opt.textContent = b.title || b.handle || ('Blog ' + b.id);
+          sel.appendChild(opt);
+        });
+        if (data.default_blog_id) sel.value = String(data.default_blog_id);
+        el.blogRow.style.display = '';
+      } else if (profile.id || profile.shop_url) {
+        autoFetchBlogs();
+      }
+
+      result.innerHTML = `
+        <strong>${data.message || 'Onboarding created'}</strong><br>
+        Client: <code>${profile.id || '—'}</code><br>
+        Shop: <code>${profile.shop_url}</code><br>
+        Status: <code>${data.status || 'awaiting_activation'}</code><br>
+        Blogs saved: <code>${data.counts?.blogs ?? '—'}</code>
+      `;
+
+      if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
+
+      // Reveal install card once onboarded
+      showInstallCardIfReady();
+
+    }catch(err){
+      result.innerHTML = `<span style="color:#ff9b9b">❌ ${err.message || 'Failed to connect'}</span>`;
+      statusDot.style.background = '#ff8b8b'; statusDot.style.boxShadow = '0 0 10px rgba(255,100,100,.9)';
+    }finally{
+      setBusy(el.onboardBtn,false);
+    }
+  });
+
+})();
+</script>
 
   <!-- load your existing onboarding JS (bundle or inline) -->
   <script src="/assets/onboarding.bundle.js"></script>
