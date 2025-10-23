@@ -48,17 +48,17 @@
           </ul>
         </div>
 
-        <div>
-          <strong>Notes</strong>
-          <ul class="hint">
-            <li>CORS is restricted to your storefront origin.</li>
-            <li>Requests must include <code>X-Seoboss-Ts</code> and <code>X-Seoboss-Hmac</code>.</li>
-            <li>Server secrets are stored as Netlify environment variables.</li>
-          </ul>
-        </div>
-      </div>
+       <div>
+  <strong>Notes</strong>
+  <ul class="hint">
+    <li><b>Admin (embedded):</b> requests must include <code>Authorization: Bearer &lt;sessionToken&gt;</code> from Shopify App Bridge.</li>
+    <li><b>Storefront App Proxy:</b> requests are validated server-side using Shopify’s query <code>signature/HMAC</code> — no client secrets in JS.</li>
+    <li>CORS is restricted to Shopify/Admin and your storefront origin.</li>
+    <li>Server secrets live in Netlify env vars.</li>
+  </ul>
+</div>
+<p class="hint">Open Admin: <a href="/admin/">/admin/</a></p>
 
-      <p class="hint">© SEOBoss</p>
     </div>
   </main>
 </body>
