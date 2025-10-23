@@ -20,6 +20,17 @@
     X-XSS-Protection = "1; mode=block"
 
 
+# -------- Admin page override: allow Shopify to embed ONLY /admin/* --------
+[[headers]]
+  for = "/admin/*"
+  [headers.values]
+    # Remove X-Frame-Options for this path so it can be iframed in Shopify Admin
+    X-Frame-Options = ""
+    # Explicitly allow Shopify Admin frames
+    Content-Security-Policy = "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
+
+
+
 # App Proxy → Job functions
 [[redirects]]
 from = "/v3/job/start"
