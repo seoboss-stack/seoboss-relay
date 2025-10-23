@@ -5,73 +5,72 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SEOBoss Admin</title>
 
-  <!-- Single App Bridge include -->
+  <!-- Single App Bridge + Utils (UMD globals) -->
   <script src="https://unpkg.com/@shopify/app-bridge@3.7.6"></script>
   <script src="https://unpkg.com/@shopify/app-bridge-utils@3.7.6"></script>
 
   <script>
   (function(){
-    // Read host/shop from query (Shopify adds these when opening from Admin)
     const qs   = new URLSearchParams(location.search);
     const host = qs.get('host') || '';
     const shop = (qs.get('shop') || '').toLowerCase();
 
-    // 1) If NOT embedded but we DO have a host → bounce into the Admin iframe
+    // If we are NOT embedded but Shopify provided host → re-embed into Admin
     if (host && window.top === window.self) {
       try {
         const app = window.ShopifyAppBridge.createApp({
-          apiKey: '5654f5c575452aefdca2592d2a2d1f3d', // your public Client ID
+          apiKey: '5654f5c575452aefdca2592d2a2d1f3d', // PUBLIC Client ID
           host
         });
         const Redirect = window.ShopifyAppBridge.actions.Redirect;
-        Redirect.create(app).dispatch(Redirect.Action.REMOTE, location.href);
-        // return; // (no return needed; Shopify will reframe us)
+        // Use APP action so Admin opens the embedded app
+        Redirect.create(app).dispatch(Redirect.Action.APP, { path: '/' });
       } catch (e) {
         console.warn('[SEOBoss] App Bridge reframe failed', e);
       }
     }
 
-    // 2) If we ARE embedded (inside an iframe with host), expose an auth’d fetch helper
-    try {
-      if (host && window.top !== window.self) {
+    // If we ARE embedded, expose a session-token fetch helper
+    if (host && window.top !== window.self) {
+      try {
         const app = window.ShopifyAppBridge.createApp({
           apiKey: '5654f5c575452aefdca2592d2a2d1f3d',
           host
         });
-        // Make getSessionToken available
-        const { getSessionToken } = window.appBridgeUtils;
+        const getSessionToken =
+          (window.appBridgeUtils && window.appBridgeUtils.getSessionToken) ||
+          (window.ShopifyAppBridgeUtils && window.ShopifyAppBridgeUtils.getSessionToken);
 
-        window.SEO_BOSS_FETCH = async (url, payload) => {
-          const token = await getSessionToken(app);
-          return fetch(url, {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${token}`,
-              'Content-Type': 'application/json',
-              'Accept': 'application/json'
-            },
-            body: JSON.stringify(payload || {})
-          });
-        };
-
-        // Mark embedded mode for your page JS
+        if (typeof getSessionToken === 'function') {
+          window.SEO_BOSS_FETCH = async (url, payload) => {
+            const token = await getSessionToken(app);
+            return fetch(url, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              body: JSON.stringify(payload || {})
+            });
+          };
+        }
         window.__SEOBOSS_EMBEDDED__ = true;
+      } catch (e) {
+        console.warn('[SEOBoss] Embedded fetch init failed', e);
       }
-    } catch (e) {
-      console.warn('[SEOBoss] Embedded fetch init failed', e);
     }
 
-    // 3) Stash shop for later (your script can read it)
+    // Stash shop hint for page JS
     if (shop) window.__SEOBOSS_SHOP__ = shop;
   })();
   </script>
 
   <style>html,body{background:#0A0F0D;color:#fff;margin:0}</style>
 </head>
-
 <body>
 
-<!-- Your onboarding UI -->
+<!-- Onboarding UI -->
 <div id="seoboss-onboarding"
      data-onboard-submit="https://hooks.seoboss.com/seoboss/api/onboarding/submit"
      data-onboard-activate="https://seoboss.com/pages/connect"
@@ -93,7 +92,8 @@
       <div id="onboardWrap">
         <form id="bossForm" novalidate>
           <input id="clientIdHidden" type="hidden" value="">
-          <!-- Step 1 (keep shop field for legacy; disabled in installed mode) -->
+
+          <!-- Step 1 (shop is auto-filled & locked when installed) -->
           <div class="row two">
             <div>
               <label>Shopify Store (domain only)</label>
@@ -136,7 +136,7 @@
             </div>
           </div>
 
-          <!-- Default blog (populated via API) -->
+          <!-- Default blog (via API) -->
           <div id="blogRow" class="row" style="display:none">
             <div>
               <label>Default blog</label>
@@ -160,9 +160,7 @@
         <!-- Interlinking import -->
         <div id="interlinkingCard" class="card" style="display:none">
           <div style="font-weight:800; margin-bottom:.4rem;">Interlinking: fetch your existing posts</div>
-          <p style="margin:.2rem 0 .8rem">
-            Import your current blog posts into your workspace. We’ll keep them updated, so your internal links and topic clusters stay fresh.
-          </p>
+          <p style="margin:.2rem 0 .8rem">Import your current blog posts into your workspace.</p>
           <div class="actions">
             <button id="importArticlesBtn" class="btn outline">Fetch existing posts</button>
           </div>
@@ -170,12 +168,10 @@
           <div id="importPreview" style="margin-top:.6rem"></div>
         </div>
 
-        <!-- Try the engine (workspace sheet) -->
+        <!-- Try the engine -->
         <div id="engineCard" class="card" style="display:none">
           <div style="font-weight:800; margin-bottom:.4rem;">Try your content engine</div>
-          <p style="margin:.2rem 0 .8rem">
-            Open your workspace to generate briefs, outlines, and internal links from your seed keywords.
-          </p>
+          <p style="margin:.2rem 0 .8rem">Open your workspace to generate briefs and outlines.</p>
           <div class="actions">
             <a id="openSheetBtn" href="#" target="_blank" rel="noopener" class="btn primary">🔗 Open your workspace</a>
           </div>
@@ -185,9 +181,7 @@
         <!-- Install engine on your store -->
         <div id="installCard" class="card" style="display:none">
           <div style="font-weight:800; margin-bottom:.4rem;">Install your engine on your store</div>
-          <p style="margin:.2rem 0 .8rem">
-            Add the console to your theme (automatic), or copy a snippet to embed on any page. It’s linked to your client ID.
-          </p>
+          <p style="margin:.2rem 0 .8rem">Add the console automatically, or copy a snippet.</p>
           <div class="actions">
             <button id="installThemeBtn" class="btn primary">⚙️ Add to Theme (auto)</button>
             <button id="copySnippetBtn" class="btn">📋 Copy embed snippet</button>
@@ -196,7 +190,7 @@
           <details id="snippetBox" style="margin-top:.6rem">
             <summary>Show embed snippet</summary>
             <textarea id="embedSnippet" rows="6" readonly style="width:100%; margin-top:.4rem"></textarea>
-            <small>Paste into a Liquid section or page. It will use your app proxy and your client ID.</small>
+            <small>Paste into a Liquid section or page.</small>
           </details>
           <small id="installMsg" class="msg"></small>
         </div>
@@ -207,7 +201,6 @@
 </div>
 
 <style>
-  /* your existing styles unchanged */
   #seoboss-onboarding { --mint:#00f5d4; --blue:#00bbf9; --ink:#e0ffe9; --bgA:#0f0c29; --bgB:#302b63; --bgC:#24243e; }
   #seoboss-onboarding { background:linear-gradient(270deg,var(--bgA),var(--bgB),var(--bgC)); background-size:600% 600%; animation:soGrad 20s ease infinite; color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
   @keyframes soGrad{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
@@ -237,18 +230,6 @@
 <script>
 (function(){
   const rootEl = document.getElementById('seoboss-onboarding');
-  const DEV = (rootEl.dataset.devMode || '0') === '1' || new URLSearchParams(location.search).has('dev');
-  const AUTO_DISCOVER_BLOGS = true;
-
-  // NOTE: keep using your existing HMAC/x-www-form-urlencoded relay posts
-  async function adminPost(url, params = {}) {
-    const body = new URLSearchParams(Object.entries(params).filter(([_,v]) => v!=null)).toString();
-    return fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Accept': 'application/json' },
-      body
-    });
-  }
 
   const $ = (s) => rootEl.querySelector(s);
   const result = $('#result');
@@ -293,12 +274,14 @@
   const readJSON = async (r)=>{ const t = await r.text(); try { return t ? JSON.parse(t) : {}; } catch { return { raw: t }; } };
   function maybe(v){ v = (v ?? '').toString().trim(); return v ? v : undefined; }
 
+  // Local storage profile
   const store = {
     save(c){ try{ localStorage.setItem('seoboss:client', JSON.stringify(c)); }catch{} },
     read(){ try{ return JSON.parse(localStorage.getItem('seoboss:client')||'{}'); }catch{ return {}; } }
   };
   function paintClientId(id){ if(!id) return; clientIdHidden.value=id; clientIdDisplay.textContent=id; clientIdBadge.style.display=''; }
 
+  // Endpoints bridge
   (function initBridge(root, el){
     const ds = el?.dataset || {};
     const req = (k)=> (ds[k] && ds[k].trim()) || '';
@@ -317,28 +300,36 @@
     root.SEO_BOSS.importArticles = ()=> base ? (base + '/api/shop/import-articles') : '';
   })(window, rootEl);
 
+  // Determine installed mode + prefill shop + lock field
   let INSTALLED_MODE = false;
   let SHOP_FROM_URL = '';
   (()=>{
     const qs = new URLSearchParams(location.search);
     SHOP_FROM_URL = (qs.get('shop') || qs.get('shopify') || qs.get('shopify_domain') || '').toLowerCase();
-
     INSTALLED_MODE = qs.get('installed') === '1' || !!qs.get('host');
 
     const CID_FROM_URL = (qs.get('client_id') || '').trim();
     if (CID_FROM_URL) { store.save({ ...(store.read()||{}), id: CID_FROM_URL, shop_url: SHOP_FROM_URL || (store.read().shop_url||'') }); paintClientId(CID_FROM_URL); }
     else { const cached = store.read(); if (cached.id) paintClientId(cached.id); }
 
+    // Prefill & lock the shop input when installed or when URL provides it
+    (function prefillShop(){
+      const cached = (store.read()?.shop_url || '').toLowerCase();
+      const hinted = SHOP_FROM_URL || cached;
+      const ok = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(hinted);
+      if (ok) {
+        el.shopInput.value = hinted;
+        el.shopInput.readOnly = true;
+        el.shopInput.disabled = true;
+        try { store.save({ ...(store.read()||{}), shop_url: hinted }); } catch {}
+      }
+    })();
+
     if (INSTALLED_MODE) {
       el.onboardBtn.textContent = 'Save Preferences';
       const sub = rootEl.querySelector('.head .sub');
       if (sub) sub.textContent = 'Connected via the Shopify app — no admin token needed.';
-      if (!SHOP_FROM_URL) {
-        const cachedShop = (store.read()?.shop_url || '').toLowerCase();
-        if (cachedShop) SHOP_FROM_URL = cachedShop;
-      }
-      if (SHOP_FROM_URL) { el.shopInput.value = SHOP_FROM_URL; el.shopInput.disabled = true; }
-      if (AUTO_DISCOVER_BLOGS && SHOP_FROM_URL) autoFetchBlogs();
+      if (AUTO_DISCOVER_BLOGS && (el.shopInput.value||'').trim()) autoFetchBlogs();
       interlinking.style.display = '';
       showInstallCardIfReady();
     }
@@ -346,7 +337,7 @@
 
   async function autoFetchBlogs(){
     const url = window.SEO_BOSS.fetchBlogs();
-    const shop = (SHOP_FROM_URL || store.read()?.shop_url || '').trim();
+    const shop = (el.shopInput.value || '').trim();
     if (!url || !shop) return;
     try{
       const rsp = await fetch(`${url}?shop=${encodeURIComponent(shop)}`);
@@ -363,7 +354,7 @@
         el.blogRow.style.display = '';
         if (d.client_id) { store.save({ ...(store.read()||{}), id: d.client_id, shop_url: shop }); paintClientId(d.client_id); }
       }
-    }catch{}
+    }catch{/* ignore */}
   }
 
   importBtn?.addEventListener('click', async ()=>{
@@ -376,9 +367,13 @@
     importPreview.innerHTML = '';
     setBusy(importBtn, true, 'Importing…');
     try{
-      const r = await adminPost(url, { client_id: client.id });
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type':'application/x-www-form-urlencoded', 'Accept':'application/json' },
+        body: new URLSearchParams({ client_id: client.id }).toString()
+      });
       const d = await readJSON(r);
-      if(!r.ok || data.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
+      if(!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
 
       const sample = Array.isArray(d.sample) ? d.sample.slice(0,10) : [];
       const parts = [
@@ -441,7 +436,11 @@
 
     setBusy(installBtn, true, 'Installing…'); installMsg.textContent = '';
     try{
-      const r = await adminPost(url, { client_id: client.id, shop: client.shop_url });
+      const r = await fetch(url, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/x-www-form-urlencoded', 'Accept':'application/json' },
+        body: new URLSearchParams({ client_id: client.id, shop: client.shop_url }).toString()
+      });
       const d = await readJSON(r);
       if (!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
       const pageUrl = d.page_url || openConsoleBtn?.href || `https://${client.shop_url}/pages/seoboss-console`;
@@ -461,6 +460,7 @@
     setTimeout(()=> copySnippetBtn.textContent = '📋 Copy embed snippet', 1200);
   });
 
+  // Submit (connect or save prefs)
   $('#bossForm')?.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const submitURL = window.SEO_BOSS.onboardSubmit();
@@ -477,16 +477,13 @@
 
     const installed = new URLSearchParams(location.search).has('host') || location.search.includes('installed=1');
 
-    // Only require shop/email in legacy (non-installed) mode
     if (!installed && (!shop_input || !contact_email)) {
       result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Please complete required fields.</span>'; 
       return;
     }
 
-    // ===== Installed mode → Save Preferences =====
     if (installed) {
       if(!updateURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Profile endpoint not set.</span>'; return; }
-
       const client = store.read() || {};
       if (client.id) paintClientId(client.id);
 
@@ -507,7 +504,11 @@
       result.style.display='block'; result.textContent = 'Saving your preferences…';
 
       try{
-        const r = await adminPost(updateURL, patch);
+        const r = await fetch(updateURL, {
+          method:'POST',
+          headers:{ 'Content-Type':'application/x-www-form-urlencoded', 'Accept':'application/json' },
+          body: new URLSearchParams(patch).toString()
+        });
         const data = await readJSON(r);
         if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Save failed');
 
@@ -556,21 +557,19 @@
       return;
     }
 
-    // ===== Legacy (non-installed) path — no admin token, server uses vault =====
+    // Legacy non-installed path
     if(!submitURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Onboarding submit endpoint not set.</span>'; return; }
 
     setBusy(el.onboardBtn,true,'Connecting…');
     result.style.display='block'; result.textContent = 'Setting up your engine… this can take up to a minute.';
 
     try{
-      const payload = {
-        client_name: '',
-        contact_email,
-        default_language,
-        shop_input,
-        tone, niche, seed_keywords, target_audience
-      };
-      const r = await adminPost(submitURL, payload);
+      const payload = { client_name:'', contact_email, default_language, shop_input, tone, niche, seed_keywords, target_audience };
+      const r = await fetch(submitURL, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/x-www-form-urlencoded', 'Accept':'application/json' },
+        body: new URLSearchParams(payload).toString()
+      });
       const data = await readJSON(r);
       if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Submit error');
 
@@ -624,7 +623,6 @@
 })();
 </script>
 
-<!-- Remove this if you don’t actually have a bundle at that path -->
-<!-- <script src="/assets/onboarding.bundle.js" defer></script> -->
+<!-- No external bundle here -->
 </body>
 </html>
