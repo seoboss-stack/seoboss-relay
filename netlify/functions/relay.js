@@ -9,6 +9,7 @@ import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 // - Any *.myshopify.com storefront (suffix match)
 const STATIC_ALLOW = new Set([
   "https://seoboss.com",
+  "https://hooks.seoboss.com",     // ← ADD THIS LINE!
   "https://t5wicb-gi.myshopify.com",
   "https://admin.shopify.com",
 ]);
