@@ -4,26 +4,34 @@
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SEOBoss Admin</title>
-  <script src="https://unpkg.com/@shopify/app-bridge@latest"></script>
-  <script type="module">
-    import { getSessionToken } from "https://unpkg.com/@shopify/app-bridge-utils@latest/dist/index.js";
-    const host = new URLSearchParams(location.search).get("host");
-    const app  = window.appBridge.createApp({ apiKey: "<PUBLIC_API_KEY>", host });
 
-    // Authenticated fetch for Admin endpoints
-    window.SEO_BOSS_FETCH = async (url, payload) => {
-      const token = await getSessionToken(app);
-      return fetch(url, {
-        method: "POST",
-        headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(payload || {})
+  <!-- App Bridge (pinned) + frame bouncer -->
+  <script src="https://unpkg.com/@shopify/app-bridge@3.7.6"></script>
+  <script>
+  (function(){
+    const qs = new URLSearchParams(location.search);
+    const host = qs.get('host');
+    if (!host) return;                  // only on Admin loads
+    if (window.top !== window.self) return; // already framed
+
+    try {
+      const app = window.ShopifyAppBridge.createApp({
+        apiKey: '5654f5c575452aefdca2592d2a2d1f3d', // your Client ID (public)
+        host
       });
-    };
+      const Redirect = window.ShopifyAppBridge.actions.Redirect;
+      Redirect.create(app).dispatch(Redirect.Action.REMOTE, location.href);
+    } catch(e) {
+      console.warn('[SEOBoss] App Bridge redirect failed:', e);
+    }
+  })();
   </script>
+
   <style>html,body{background:#0A0F0D;color:#fff;margin:0}</style>
 </head>
 <body>
-  <!-- SEOBoss — Connect / Save Preferences + Import Existing Posts + Install Engine (Admin-safe) -->
+
+<!-- Your onboarding UI -->
 <div id="seoboss-onboarding"
      data-onboard-submit="https://hooks.seoboss.com/seoboss/api/onboarding/submit"
      data-onboard-activate="https://seoboss.com/pages/connect"
@@ -45,15 +53,13 @@
       <div id="onboardWrap">
         <form id="bossForm" novalidate>
           <input id="clientIdHidden" type="hidden" value="">
-
-          <!-- Step 1 -->
+          <!-- Step 1 (keep shop field for legacy; disabled in installed mode) -->
           <div class="row two">
             <div>
               <label>Shopify Store (domain only)</label>
               <input id="shopInput" placeholder="yourstore.myshopify.com" required>
               <small>No https:// — just the myshopify.com domain.</small>
             </div>
-            <!-- REMOVED: tokenRow (no longer needed) -->
           </div>
 
           <!-- Step 2 -->
@@ -161,12 +167,13 @@
 </div>
 
 <style>
+  /* your existing styles unchanged */
   #seoboss-onboarding { --mint:#00f5d4; --blue:#00bbf9; --ink:#e0ffe9; --bgA:#0f0c29; --bgB:#302b63; --bgC:#24243e; }
   #seoboss-onboarding { background:linear-gradient(270deg,var(--bgA),var(--bgB),var(--bgC)); background-size:600% 600%; animation:soGrad 20s ease infinite; color:var(--ink); font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif }
   @keyframes soGrad{0%{background-position:0% 50%}50%{background-position:100% 50%}100%{background-position:0% 50%}}
   .wrap{ max-width:980px; margin:0 auto; padding:1.2rem }
   .panel{ margin:1.4rem auto; padding:1.4rem; border-radius:18px; background:linear-gradient(135deg,var(--bgA),var(--bgB) 60%,var(--bgA)); box-shadow:0 0 36px rgba(0,245,212,.22) }
-  .head h2{ margin:.2rem 0 .3rem; color:var(--mint); text-shadow:0 0 10px rgba(0,255,200,.6) }
+  .head h2{ margin:.2rem 0 .3rem; color:#00f5d4; text-shadow:0 0 10px rgba(0,255,200,.6) }
   .head .sub{ color:#cfefff }
   .status{ font-weight:700; margin-bottom:.4rem }
   .dot{ width:12px; height:12px; border-radius:50%; background:var(--mint); display:inline-block; margin-right:8px; box-shadow:0 0 12px rgba(0,255,200,.8); animation:pulse 1.8s infinite }
@@ -190,18 +197,11 @@
 <script>
 (function(){
   const rootEl = document.getElementById('seoboss-onboarding');
-
-  // ===== Config =====
   const DEV = (rootEl.dataset.devMode || '0') === '1' || new URLSearchParams(location.search).has('dev');
   const AUTO_DISCOVER_BLOGS = true;
 
-  // ---- Admin fetch shim: uses App Bridge if available; falls back to form POST outside Admin
+  // NOTE: keep using your existing HMAC/x-www-form-urlencoded relay posts
   async function adminPost(url, params = {}) {
-    if (typeof window.SEO_BOSS_FETCH === 'function') {
-      // Send JSON when embedded in Admin
-      return window.SEO_BOSS_FETCH(url, params);
-    }
-    // Legacy fallback (non-embedded/dev): x-www-form-urlencoded
     const body = new URLSearchParams(Object.entries(params).filter(([_,v]) => v!=null)).toString();
     return fetch(url, {
       method: 'POST',
@@ -210,7 +210,6 @@
     });
   }
 
-  // ===== Helpers =====
   const $ = (s) => rootEl.querySelector(s);
   const result = $('#result');
   const savedBadge = $('#savedBadge');
@@ -226,7 +225,6 @@
   const engineCard = $('#engineCard');
   const openSheetBtn = $('#openSheetBtn');
 
-  // NEW — install card elements
   const installCard = $('#installCard');
   const installBtn = $('#installThemeBtn');
   const copySnippetBtn = $('#copySnippetBtn');
@@ -255,14 +253,12 @@
   const readJSON = async (r)=>{ const t = await r.text(); try { return t ? JSON.parse(t) : {}; } catch { return { raw: t }; } };
   function maybe(v){ v = (v ?? '').toString().trim(); return v ? v : undefined; }
 
-  // local cache
   const store = {
     save(c){ try{ localStorage.setItem('seoboss:client', JSON.stringify(c)); }catch{} },
     read(){ try{ return JSON.parse(localStorage.getItem('seoboss:client')||'{}'); }catch{ return {}; } }
   };
   function paintClientId(id){ if(!id) return; clientIdHidden.value=id; clientIdDisplay.textContent=id; clientIdBadge.style.display=''; }
 
-  // ===== Endpoints bridge =====
   (function initBridge(root, el){
     const ds = el?.dataset || {};
     const req = (k)=> (ds[k] && ds[k].trim()) || '';
@@ -271,7 +267,6 @@
       updateProfile:   req('updateProfile'),
       engineInstall:   req('engineInstall'),
     };
-    // base from /api/onboarding/submit
     const base = endpoints.onboardSubmit ? endpoints.onboardSubmit.replace(/\/api\/onboarding\/submit.*$/,'') : '';
 
     root.SEO_BOSS = root.SEO_BOSS || {};
@@ -282,22 +277,19 @@
     root.SEO_BOSS.importArticles = ()=> base ? (base + '/api/shop/import-articles') : '';
   })(window, rootEl);
 
-  // ===== Install detect & prefill =====
   let INSTALLED_MODE = false;
   let SHOP_FROM_URL = '';
   (()=>{
     const qs = new URLSearchParams(location.search);
     SHOP_FROM_URL = (qs.get('shop') || qs.get('shopify') || qs.get('shopify_domain') || '').toLowerCase();
 
-    // Consider embedded Admin as installed mode automatically
-    INSTALLED_MODE = !!window.SEO_BOSS_FETCH || qs.get('installed') === '1';
+    INSTALLED_MODE = qs.get('installed') === '1' || !!qs.get('host');
 
     const CID_FROM_URL = (qs.get('client_id') || '').trim();
     if (CID_FROM_URL) { store.save({ ...(store.read()||{}), id: CID_FROM_URL, shop_url: SHOP_FROM_URL || (store.read().shop_url||'') }); paintClientId(CID_FROM_URL); }
     else { const cached = store.read(); if (cached.id) paintClientId(cached.id); }
 
     if (INSTALLED_MODE) {
-      // UI copy for embedded
       el.onboardBtn.textContent = 'Save Preferences';
       const sub = rootEl.querySelector('.head .sub');
       if (sub) sub.textContent = 'Connected via the Shopify app — no admin token needed.';
@@ -307,13 +299,11 @@
       }
       if (SHOP_FROM_URL) { el.shopInput.value = SHOP_FROM_URL; el.shopInput.disabled = true; }
       if (AUTO_DISCOVER_BLOGS && SHOP_FROM_URL) autoFetchBlogs();
-      interlinking.style.display = ''; // show interlinking card after install
-      // if we already know client + shop, expose install card
+      interlinking.style.display = '';
       showInstallCardIfReady();
     }
   })();
 
-  // ===== Blog loader (GET only) =====
   async function autoFetchBlogs(){
     const url = window.SEO_BOSS.fetchBlogs();
     const shop = (SHOP_FROM_URL || store.read()?.shop_url || '').trim();
@@ -333,10 +323,9 @@
         el.blogRow.style.display = '';
         if (d.client_id) { store.save({ ...(store.read()||{}), id: d.client_id, shop_url: shop }); paintClientId(d.client_id); }
       }
-    }catch{/* silent */}
+    }catch{}
   }
 
-  // ===== Import existing posts (interlinking) =====
   importBtn?.addEventListener('click', async ()=>{
     const url = window.SEO_BOSS.importArticles();
     const client = store.read() || {};
@@ -351,7 +340,6 @@
       const d = await readJSON(r);
       if(!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
 
-      // summary + preview (show up to 10)
       const sample = Array.isArray(d.sample) ? d.sample.slice(0,10) : [];
       const parts = [
         `Imported ${d.imported ?? '—'} posts`,
@@ -365,7 +353,6 @@
         const summary = document.createElement('summary');
         summary.textContent = `Preview ${sample.length} recent posts`;
         details.appendChild(summary);
-
         const ul = document.createElement('ul');
         sample.forEach(p=>{
           const li = document.createElement('li');
@@ -377,12 +364,7 @@
         importPreview.appendChild(details);
       }
 
-      if (d.sheet_url) {
-        openSheetBtn.href = d.sheet_url;
-        engineCard.style.display = '';
-      }
-
-      // expose install card after import (we now definitely have client+shop in store)
+      if (d.sheet_url) { openSheetBtn.href = d.sheet_url; engineCard.style.display = ''; }
       showInstallCardIfReady();
 
     }catch(err){
@@ -392,17 +374,14 @@
     }
   });
 
-  // ===== Install card logic =====
   function showInstallCardIfReady(){
     const client = store.read() || {};
     const shop = (client.shop_url || '').toLowerCase();
     if (!client.id || !shop) return;
 
-    // App Proxy console URL (fallback to hidden page if returned by backend)
     const proxyUrl = `https://${shop}/apps/seoboss/console?client_id=${encodeURIComponent(client.id)}`;
     if (openConsoleBtn) openConsoleBtn.href = proxyUrl;
 
-    // Embeddable snippet
     const embed = [
       `<div id="seoboss-console"`,
       `     data-client-id="${client.id}"`,
@@ -442,7 +421,6 @@
     setTimeout(()=> copySnippetBtn.textContent = '📋 Copy embed snippet', 1200);
   });
 
-  // ===== Form submit (Connect or Save Prefs) =====
   $('#bossForm')?.addEventListener('submit', async (e)=>{
     e.preventDefault();
     const submitURL = window.SEO_BOSS.onboardSubmit();
@@ -457,12 +435,13 @@
     const target_audience  = (el.targetAudience.value||'').trim();
     const default_blog_id  = (el.blogSelect?.value || '').trim();
 
-    if(!shop_input || !contact_email){
-      result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Please complete required fields.</span>'; return;
-    }
+    const installed = new URLSearchParams(location.search).has('host') || location.search.includes('installed=1');
 
-    // Consider embedded Admin as installed
-    const installed = !!window.SEO_BOSS_FETCH || location.search.includes('installed=1');
+    // Only require shop/email in legacy (non-installed) mode
+    if (!installed && (!shop_input || !contact_email)) {
+      result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Please complete required fields.</span>'; 
+      return;
+    }
 
     // ===== Installed mode → Save Preferences =====
     if (installed) {
@@ -509,7 +488,6 @@
         statusDot.style.background = 'var(--mint)';
         result.innerHTML = '<strong>Preferences saved.</strong>';
 
-        // Blog picker from backend, else auto
         if (Array.isArray(data.blogs_list) && data.blogs_list.length) {
           const sel = el.blogSelect; sel.innerHTML = '';
           data.blogs_list.forEach(b=>{
@@ -524,11 +502,9 @@
           autoFetchBlogs();
         }
 
-        // Workspace link
         if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
         else if (client.sheet_url) { openSheetBtn.href = client.sheet_url; engineCard.style.display = ''; }
 
-        // Now that we know client + shop, reveal install
         showInstallCardIfReady();
 
       }catch(err){
@@ -540,7 +516,7 @@
       return;
     }
 
-    // ===== Non-installed path → (optional legacy) create onboarding WITHOUT asking for token =====
+    // ===== Legacy (non-installed) path — no admin token, server uses vault =====
     if(!submitURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Onboarding submit endpoint not set.</span>'; return; }
 
     setBusy(el.onboardBtn,true,'Connecting…');
@@ -556,7 +532,7 @@
       };
       const r = await adminPost(submitURL, payload);
       const data = await readJSON(r);
-      if(!r.ok || d.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Submit error');
+      if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Submit error');
 
       const profile = {
         id: data.client_id || (store.read().id || ''),
@@ -595,8 +571,6 @@
       `;
 
       if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
-
-      // Reveal install card once onboarded
       showInstallCardIfReady();
 
     }catch(err){
@@ -610,7 +584,7 @@
 })();
 </script>
 
-  <!-- load your existing onboarding JS (bundle or inline) -->
-  <script src="/assets/onboarding.bundle.js"></script>
+<!-- Remove this if you don’t actually have a bundle at that path -->
+<!-- <script src="/assets/onboarding.bundle.js" defer></script> -->
 </body>
 </html>
