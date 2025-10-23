@@ -1,6 +1,6 @@
 // netlify/functions/shopify-callback.mjs
 import crypto from "node:crypto";
-import { errlog } from './_lib/_errlog.mjs';  // ✅ REPLACE OLD IMPORT
+import { errlog } from './_lib/_errlog.mjs';
 
 // ---------- helpers ----------
 function parseCookies(header = "") {
@@ -91,17 +91,12 @@ async function postToN8NFireAndForget({ url, headers, body, timeoutMs = 2500 }) 
       headers,
       body,
       signal: controller.signal,
-    }).catch((e) => {
-      // aborted or network error → ignore (we don't want to block UX)
-      return null;
-    });
+    }).catch(() => null);
     if (res && res.ok) {
       try {
         const data = await res.json().catch(() => ({}));
         client_id = data?.client_id || data?.clientId || "";
-      } catch {
-        // ignore JSON errors
-      }
+      } catch {}
     }
   } finally {
     clearTimeout(timer);
@@ -122,7 +117,6 @@ export const handler = async (event) => {
     const FWD_SECRET = process.env.FORWARD_SECRET || "";
 
     if (!API_KEY || !SECRET) {
-      // ✅ ADD THIS - Log missing credentials
       await errlog({
         shop: '',
         route: '/shopify-callback',
@@ -136,7 +130,6 @@ export const handler = async (event) => {
     }
 
     if (!ONBOARD_URL) {
-      // ✅ ADD THIS - Log missing n8n URL
       await errlog({
         shop: '',
         route: '/shopify-callback',
@@ -152,13 +145,13 @@ export const handler = async (event) => {
     const url = new URL(event.rawUrl);
     const q = Object.fromEntries(url.searchParams.entries());
     const { shop: rawShop, hmac, code, state, timestamp } = q;
+    const host = q.host || ''; // carry Admin host through to final redirect
 
     // Validate shop + state
     shop = normShop(rawShop);
     const shopRe = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
     if (!shopRe.test(shop || "")) return { statusCode: 400, body: "invalid shop" };
 
-    // Only enforce state if we actually set a cookie upstream (prevents false 401s)
     const cookies = parseCookies(event.headers?.cookie || event.headers?.Cookie || "");
     if (state && cookies.shopify_oauth_state && cookies.shopify_oauth_state !== state) {
       return { statusCode: 401, body: "bad state" };
@@ -186,11 +179,9 @@ export const handler = async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ client_id: API_KEY, client_secret: SECRET, code }),
     });
-    
+
     if (!tokenRes.ok) {
       const errTxt = await tokenRes.text();
-      
-      // ✅ ADD THIS - Log token exchange failure
       await errlog({
         shop,
         route: '/shopify-callback',
@@ -200,17 +191,15 @@ export const handler = async (event) => {
         request_id,
         code: 'E_OAUTH_TOKEN_EXCHANGE'
       });
-      
       return { statusCode: 502, body: `token exchange failed: ${errTxt}` };
     }
-    
+
     const { access_token /*, scope*/ } = await tokenRes.json();
 
-    // Store token securely (don't ship raw token to n8n in future)
+    // Store token securely (vault)
     try {
       await storeTokenVault({ shop, access_token });
     } catch (e) {
-      // ✅ REPLACE OLD LOGGING - Use new errlog
       await errlog({
         shop,
         route: '/shopify-callback',
@@ -219,14 +208,13 @@ export const handler = async (event) => {
         detail: e?.message || String(e),
         request_id,
         code: 'E_TOKEN_STORAGE'
-      }).catch(() => {}); // Fire and forget - don't block redirect
+      }).catch(() => {});
     }
 
     // Register app/uninstalled webhook
     try {
       await registerWebhooks({ shop, access_token, baseUrl: publicBaseUrl(event) });
     } catch (e) {
-      // ✅ REPLACE OLD LOGGING - Use new errlog
       await errlog({
         shop,
         route: '/shopify-callback',
@@ -235,16 +223,16 @@ export const handler = async (event) => {
         detail: e?.message || String(e),
         request_id,
         code: 'E_WEBHOOK_REGISTRATION'
-      }).catch(() => {}); // Fire and forget - don't block redirect
+      }).catch(() => {});
     }
 
-    // Prepare one-time onboarding POST to n8n
+    // Prepare one-time onboarding POST to n8n (non-blocking)
     const bodyForm = new URLSearchParams({
       client_name: "",
       contact_email: "",
       default_language: "en",
-      shop_input: shop, // your sanitize node expects this
-      admin_token: access_token, // TEMP: legacy path; migrate to vault fetch in n8n later
+      shop_input: shop,
+      admin_token: access_token, // TEMP legacy path
       tone: "",
       niche: "",
       seed_keywords: "",
@@ -257,21 +245,19 @@ export const handler = async (event) => {
       "X-SEOBOSS-FORWARD-SECRET": FWD_SECRET,
       "X-Seoboss-Ts": ts2,
       "X-Seoboss-Key-Id": "global",
-      "X-Request-Id": request_id,  // ✅ ADD THIS - Forward correlation ID
+      "X-Request-Id": request_id,
     };
     if (PUBLIC_HMAC_KEY) {
       const sig = crypto.createHmac("sha256", PUBLIC_HMAC_KEY).update(bodyForm + "\n" + ts2).digest("hex");
       headers["X-Seoboss-Hmac"] = sig;
     }
 
-    // Fire-and-forget n8n with short timeout; don't block redirect
     const client_id = await postToN8NFireAndForget({
       url: ONBOARD_URL,
       headers,
       body: bodyForm,
       timeoutMs: 2500,
     }).catch((e) => {
-      // ✅ ADD THIS - Log n8n onboarding failure (fire and forget)
       errlog({
         shop,
         route: '/shopify-callback',
@@ -280,27 +266,27 @@ export const handler = async (event) => {
         detail: e?.message || String(e),
         request_id,
         code: 'E_N8N_ONBOARDING'
-      }).catch(() => {}); // Fire and forget
+      }).catch(() => {});
       return "";
     });
 
-    // Redirect to Connect with installed=1 (and client_id if available)
-    const qp = new URLSearchParams({ shop, installed: "1" });
-    if (client_id) qp.set("client_id", client_id);
-
+    // === FINAL REDIRECT → embedded Admin (no more /pages/connect) ===
+    const adminQs = new URLSearchParams({ shop });
+    if (host) adminQs.set('host', host);
+    if (client_id) adminQs.set('client_id', client_id); // optional: pass through
     return {
       statusCode: 302,
       headers: {
-        Location: `https://seoboss.com/pages/connect?${qp.toString()}`,
-        // clear any state cookie we might have set
-        "Set-Cookie":
-          "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+        Location: `https://hooks.seoboss.com/admin?${adminQs.toString()}`,
+        "Set-Cookie": "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
       },
       body: "",
     };
-    
+
   } catch (e) {
-    // ✅ REPLACE OLD LOGGING - Use new errlog
+    // On error, still try to land in embedded Admin
+    let host = "";
+    try { host = new URL(event.rawUrl).searchParams.get("host") || ""; } catch {}
     await errlog({
       shop,
       route: '/shopify-callback',
@@ -309,12 +295,11 @@ export const handler = async (event) => {
       detail: e.stack || e?.message || String(e),
       request_id,
       code: 'E_EXCEPTION'
-    }).catch(() => {}); // Fire and forget - don't block redirect
-    
+    }).catch(() => {});
     return {
       statusCode: 302,
       headers: {
-        Location: `https://seoboss.com/pages/connect?shop=${encodeURIComponent(shop || "")}&installed=1`,
+        Location: `https://hooks.seoboss.com/admin?shop=${encodeURIComponent(shop || "")}${host ? `&host=${encodeURIComponent(host)}` : ""}`,
       },
       body: "",
     };
