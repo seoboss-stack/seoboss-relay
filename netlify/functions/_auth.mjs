@@ -1,25 +1,30 @@
-import * as jose from 'jose';
+// netlify/functions/_auth.mjs
+import { jwtVerify } from "jose";
 
-const APP_SECRET = process.env.SHOPIFY_APP_SECRET;      // from Partners
-const APP_KEY    = process.env.SHOPIFY_API_KEY_PUBLIC;  // from Partners
-const secretKey  = new TextEncoder().encode(APP_SECRET);
+const enc = (s) => new TextEncoder().encode(s);
 
-export async function verifyShopifySessionToken(authHeader) {
-  const raw = (authHeader || '').replace(/^Bearer\s+/i, '').trim();
-  if (!raw) throw Object.assign(new Error('Missing session token'), { status: 401 });
+/**
+ * Verifies the Shopify Admin session token coming from App Bridge:
+ * - HS256 signed with your APP SECRET
+ * - audience must equal your PUBLIC API KEY
+ * Returns { shop, payload }
+ */
+export async function verifyShopifySessionToken(authHeader = "") {
+  if (!authHeader?.startsWith("Bearer ")) throw new Error("missing bearer");
+  const token = authHeader.slice(7).trim();
 
-  const { payload } = await jose.jwtVerify(raw, secretKey, {
-    algorithms: ['HS256'],
-    audience: APP_KEY,
+  const apiKey    = process.env.SHOPIFY_API_KEY       || process.env.PUBLIC_API_KEY;
+  const apiSecret = process.env.SHOPIFY_APP_SECRET    || process.env.SHOPIFY_API_SECRET;
+  if (!apiKey || !apiSecret) throw new Error("missing app credentials");
+
+  const { payload } = await jwtVerify(token, enc(apiSecret), {
+    audience: apiKey, // must match your app’s public API key
   });
 
-  const now = Math.floor(Date.now()/1000);
-  if (payload.nbf && now < payload.nbf) throw Object.assign(new Error('Token not yet valid'), { status: 401 });
-  if (payload.exp && now >= payload.exp) throw Object.assign(new Error('Token expired'), { status: 401 });
-
-  const dest = String(payload.dest || '').toLowerCase();
-  const shop = dest.replace(/^https?:\/\//,'').replace(/\/+$/,'');
-  if (!shop.endsWith('.myshopify.com')) throw Object.assign(new Error('Bad dest'), { status: 401 });
+  // payload.dest looks like "https://yourshop.myshopify.com/admin"
+  const dest = String(payload.dest || "");
+  const host = new URL(dest).host.toLowerCase(); // yourshop.myshopify.com
+  const shop = host.replace(/\.shopify\.com$/i, ".myshopify.com");
 
   return { shop, payload };
 }
