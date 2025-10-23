@@ -1,13 +1,14 @@
 [build]
   functions = "netlify/functions"
 
+[build.environment]
+  NODE_VERSION = "20"
+  SECRETS_SCAN_OMIT_PATHS = "admin/**,public/admin/**"
+
 [functions]
   node_bundler = "esbuild"
   # ensure the module is loaded from root node_modules at runtime
   external_node_modules = ["@supabase/supabase-js", "googleapis"]
-
-[build.environment]
-  NODE_VERSION = "20"
 
 # Enforce HTTPS & basic headers
 [[headers]]
@@ -19,7 +20,6 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-XSS-Protection = "1; mode=block"
 
-
 # -------- Admin page override: allow Shopify to embed ONLY /admin/* --------
 [[headers]]
   for = "/admin/*"
@@ -28,8 +28,6 @@
     X-Frame-Options = ""
     # Explicitly allow Shopify Admin frames
     Content-Security-Policy = "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
-
-
 
 # App Proxy → Job functions
 [[redirects]]
@@ -62,9 +60,6 @@ force = true
   to = "/.netlify/functions/whoami"
   status = 200
 
-
-
-
 # Catch-all relay for SEOBoss API
 [[redirects]]
   from = "/seoboss/api/*"
@@ -79,7 +74,7 @@ force = true
   status = 200
   force = true
 
-  [[redirects]]
+[[redirects]]
   from = "/apps/engine/v3/vault/add"
   to = "/.netlify/functions/vault-add"
   status = 200
@@ -98,7 +93,6 @@ force = true
   status = 200
   force = true
 
-
 # App Proxy → Engine Proxy function
 [[redirects]]
   from = "/proxy/*"
@@ -106,9 +100,7 @@ force = true
   status = 200
   force = true
 
-
-
-  # Vault endpoints that Shopify App Proxy actually forwards to your site
+# Vault endpoints that Shopify App Proxy actually forwards to your site
 [[redirects]]
   from = "/v3/vault/list"
   to = "/.netlify/functions/vault-list"
@@ -133,7 +125,6 @@ force = true
   to   = "/.netlify/functions/vault-delete"
   status = 200
   force = true
-
 
 [[redirects]]
   from = "/apps/engine/v3/vault/add"
