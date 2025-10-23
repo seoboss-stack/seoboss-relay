@@ -412,7 +412,22 @@
   }
   
   // ============================================
-  // 2. LOCAL STORAGE HELPER
+  // 2. AUTHENTICATION HELPERS
+  // ============================================
+  // IMPORTANT: This must match your n8n FORWARD_SECRET environment variable
+  const FORWARD_SECRET = 'G9dk82nN2mX7pQb4vT!sZy';
+  
+  // Create headers for n8n authentication
+  function createAuthHeaders() {
+    const timestamp = Math.floor(Date.now() / 1000).toString();
+    return {
+      'X-SEOBOSS-FORWARD-SECRET': FORWARD_SECRET,
+      'X-Seoboss-Ts': timestamp
+    };
+  }
+  
+  // ============================================
+  // 3. LOCAL STORAGE HELPER
   // ============================================
   const store = {
     key: 'seoboss_client',
@@ -590,11 +605,13 @@
     el.installMsg.textContent = 'Adding to your theme...';
     
     try {
+      const authHeaders = createAuthHeaders();
       const response = await fetch(installUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json'
+          'Accept': 'application/json',
+          ...authHeaders
         },
         body: new URLSearchParams({
           client_id: client.id,
@@ -709,11 +726,14 @@
           body: JSON.stringify(payload)
         });
       } else {
+        // Add auth headers for n8n
+        const authHeaders = createAuthHeaders();
         response = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
-            'Accept': 'application/json'
+            'Accept': 'application/json',
+            ...authHeaders
           },
           body: new URLSearchParams(payload)
         });
