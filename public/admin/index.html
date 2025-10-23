@@ -632,16 +632,23 @@
         client_id: client.id,
         shop: client.shop_url
       };
-      const authHeaders = await createAuthHeaders(installPayload);
+      
+      // Create canonical form body for HMAC
+      const body = canonicalForm(installPayload);
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const hmac = await hmacHex(HMAC_KEY, body + '\n' + timestamp);
       
       const response = await fetch(installUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
-          ...authHeaders
+          'X-SEOBOSS-FORWARD-SECRET': FORWARD_SECRET,
+          'X-Seoboss-Ts': timestamp,
+          'X-Seoboss-Hmac': hmac,
+          'X-Seoboss-Key-Id': 'global'
         },
-        body: new URLSearchParams(installPayload)
+        body: body  // Send the canonical form string
       });
       
       const data = await readJSON(response);
@@ -743,17 +750,23 @@
     el.result.textContent = isUpdate ? 'Saving preferences...' : 'Setting up your workspace...';
     
     try {
-      // Add auth headers with HMAC signature
-      const authHeaders = await createAuthHeaders(payload);
+      // Create canonical form body for HMAC
+      const body = canonicalForm(payload);
+      const timestamp = Math.floor(Date.now() / 1000).toString();
+      const hmac = await hmacHex(HMAC_KEY, body + '\n' + timestamp);
       
+      // Send the same canonical form body that was signed
       response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
           'Accept': 'application/json',
-          ...authHeaders
+          'X-SEOBOSS-FORWARD-SECRET': FORWARD_SECRET,
+          'X-Seoboss-Ts': timestamp,
+          'X-Seoboss-Hmac': hmac,
+          'X-Seoboss-Key-Id': 'global'
         },
-        body: new URLSearchParams(payload)
+        body: body  // Send the canonical form string directly
       });
       
       const data = await readJSON(response);
