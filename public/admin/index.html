@@ -5,9 +5,8 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SEOBoss — Connect Your Store</title>
 
-  <!-- Shopify App Bridge v3 -->
-  <script src="https://unpkg.com/@shopify/app-bridge@3.7.10/umd/index.js"></script>
-  <script src="https://unpkg.com/@shopify/app-bridge-utils@3.7.10/umd/index.js"></script>
+  <!-- Shopify App Bridge (Official CDN) -->
+  <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
 
   <style>
     html, body {
@@ -363,13 +362,16 @@
   
   let app, appReady = false;
   
+  // Wait for Shopify App Bridge to load
+  const AppBridge = window.Shopify?.AppBridge;
+  if (!AppBridge || !AppBridge.createApp) {
+    console.error('[SEOBoss] Shopify App Bridge failed to load');
+    document.getElementById('statusText').textContent = 'Failed to load App Bridge';
+    return;
+  }
+  
   try {
-    // Check if App Bridge loaded
-    if (typeof createApp === 'undefined') {
-      throw new Error('App Bridge createApp not found');
-    }
-    
-    app = createApp({
+    app = AppBridge.createApp({
       apiKey: API_KEY,
       host: host,
     });
@@ -380,6 +382,7 @@
     document.getElementById('statusText').textContent = 'Failed to initialize';
     return;
   }
+
   // Check if we have a valid session
   (async function checkAuth() {
     try {
