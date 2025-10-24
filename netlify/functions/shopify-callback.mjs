@@ -79,31 +79,6 @@ async function storeTokenVault({ shop, access_token }) {
   }
 }
 
-// Fire n8n but never block the user redirect
-async function postToN8NFireAndForget({ url, headers, body, timeoutMs = 2500 }) {
-  let client_id = "";
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-
-  try {
-    const res = await fetch(url, {
-      method: "POST",
-      headers,
-      body,
-      signal: controller.signal,
-    }).catch(() => null);
-    if (res && res.ok) {
-      try {
-        const data = await res.json().catch(() => ({}));
-        client_id = data?.client_id || data?.clientId || "";
-      } catch {}
-    }
-  } finally {
-    clearTimeout(timer);
-  }
-  return client_id;
-}
-
 // ---------- handler ----------
 export const handler = async (event) => {
   const request_id = event.headers?.["x-nf-request-id"] || event.headers?.["x-request-id"] || "";
@@ -112,9 +87,6 @@ export const handler = async (event) => {
   try {
     const API_KEY = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
     const SECRET = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET || "";
-    const ONBOARD_URL = process.env.N8N_ONBOARD_SUBMIT_URL; // https://.../webhook/seoboss/api/onboarding/submit
-    const PUBLIC_HMAC_KEY = process.env.PUBLIC_HMAC_KEY || "";
-    const FWD_SECRET = process.env.FORWARD_SECRET || "";
 
     if (!API_KEY || !SECRET) {
       await errlog({
@@ -127,19 +99,6 @@ export const handler = async (event) => {
         code: 'E_CONFIG'
       });
       return { statusCode: 500, body: "missing API key/secret" };
-    }
-
-    if (!ONBOARD_URL) {
-      await errlog({
-        shop: '',
-        route: '/shopify-callback',
-        status: 500,
-        message: 'N8N_ONBOARD_SUBMIT_URL not configured',
-        detail: 'Cannot complete onboarding flow',
-        request_id,
-        code: 'E_CONFIG'
-      });
-      return { statusCode: 500, body: "missing N8N_ONBOARD_SUBMIT_URL" };
     }
 
     const url = new URL(event.rawUrl);
@@ -174,6 +133,7 @@ export const handler = async (event) => {
     if (!safe) return { statusCode: 401, body: "invalid hmac" };
 
     // Exchange code -> offline access token
+    console.log('[CALLBACK] Exchanging OAuth code for access token...');
     const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -194,9 +154,10 @@ export const handler = async (event) => {
       return { statusCode: 502, body: `token exchange failed: ${errTxt}` };
     }
 
-    const { access_token /*, scope*/ } = await tokenRes.json();
+    const { access_token } = await tokenRes.json();
+    console.log('[CALLBACK] Got access token, storing in vault...');
 
-    // Store token securely (vault)
+    // Store token securely in vault (for future use)
     try {
       await storeTokenVault({ shop, access_token });
     } catch (e) {
@@ -209,9 +170,11 @@ export const handler = async (event) => {
         request_id,
         code: 'E_TOKEN_STORAGE'
       }).catch(() => {});
+      // Don't fail the flow - we can still pass token via cookie
     }
 
     // Register app/uninstalled webhook
+    console.log('[CALLBACK] Registering webhooks...');
     try {
       await registerWebhooks({ shop, access_token, baseUrl: publicBaseUrl(event) });
     } catch (e) {
@@ -224,69 +187,37 @@ export const handler = async (event) => {
         request_id,
         code: 'E_WEBHOOK_REGISTRATION'
       }).catch(() => {});
+      // Don't fail the flow
     }
 
-    // Prepare one-time onboarding POST to n8n (non-blocking)
-    const bodyForm = new URLSearchParams({
-      client_name: "",
-      contact_email: "",
-      default_language: "en",
-      shop_input: shop,
-      admin_token: access_token, // TEMP legacy path
-      tone: "",
-      niche: "",
-      seed_keywords: "",
-      target_audience: "",
-    }).toString();
+    console.log('[CALLBACK] OAuth complete! Redirecting to admin page with token cookie...');
 
-    const ts2 = String(Math.floor(Date.now() / 1000));
-    const headers = {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "X-SEOBOSS-FORWARD-SECRET": FWD_SECRET,
-      "X-Seoboss-Ts": ts2,
-      "X-Seoboss-Key-Id": "global",
-      "X-Request-Id": request_id,
-    };
-    if (PUBLIC_HMAC_KEY) {
-      const sig = crypto.createHmac("sha256", PUBLIC_HMAC_KEY).update(bodyForm + "\n" + ts2).digest("hex");
-      headers["X-Seoboss-Hmac"] = sig;
-    }
-
-    const client_id = await postToN8NFireAndForget({
-      url: ONBOARD_URL,
-      headers,
-      body: bodyForm,
-      timeoutMs: 2500,
-    }).catch((e) => {
-      errlog({
-        shop,
-        route: '/shopify-callback',
-        status: 500,
-        message: 'Failed to notify n8n of onboarding',
-        detail: e?.message || String(e),
-        request_id,
-        code: 'E_N8N_ONBOARDING'
-      }).catch(() => {});
-      return "";
-    });
-
-    // === FINAL REDIRECT → embedded Admin (no more /pages/connect) ===
+    // === REDIRECT TO ADMIN with token in cookie ===
+    // NOTE: We do NOT call n8n here - the admin form will do that when user submits!
     const adminQs = new URLSearchParams({ shop });
     if (host) adminQs.set('host', host);
-    if (client_id) adminQs.set('client_id', client_id); // optional: pass through
+    
     return {
       statusCode: 302,
       headers: {
         Location: `https://hooks.seoboss.com/admin?${adminQs.toString()}`,
-        "Set-Cookie": "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+        // Set cookies: clear OAuth state, set token cookie
+        "Set-Cookie": [
+          "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
+          // Token cookie: 10 min expiry, SameSite=None for iframe compatibility
+          `shop_token=${access_token}; Max-Age=600; Path=/; HttpOnly; Secure; SameSite=None`
+        ].join(', ')
       },
       body: "",
     };
 
   } catch (e) {
-    // On error, still try to land in embedded Admin
+    // On error, still try to land in embedded Admin (without token)
     let host = "";
     try { host = new URL(event.rawUrl).searchParams.get("host") || ""; } catch {}
+    
+    console.error('[CALLBACK] Uncaught exception:', e);
+    
     await errlog({
       shop,
       route: '/shopify-callback',
@@ -296,6 +227,7 @@ export const handler = async (event) => {
       request_id,
       code: 'E_EXCEPTION'
     }).catch(() => {});
+    
     return {
       statusCode: 302,
       headers: {
