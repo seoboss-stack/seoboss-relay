@@ -6,8 +6,76 @@
   <title>SEOBoss — Connect Your Store</title>
 
   <!-- Shopify App Bridge UMD -->
-  <script src="https://unpkg.com/@shopify/app-bridge@3.7.10/umd/index.js"></script>
-  <script src="https://unpkg.com/@shopify/app-bridge-utils@3.7.10/umd/index.js"></script>
+ <script src="https://unpkg.com/@shopify/app-bridge@3.7.6"></script>
+<script src="https://unpkg.com/@shopify/app-bridge-utils@3.7.6"></script>
+<script>
+(function(){
+  const qs   = new URLSearchParams(location.search);
+  const host = qs.get('host') || '';
+  const shop = (qs.get('shop') || '').toLowerCase();
+
+  // Expose shop hint for your UI
+  if (shop) window.__SEOBOSS_SHOP__ = shop;
+
+  // Try to create App Bridge safely with small retries
+  function ready(fn, tries=15){
+    const ok = !!(window.ShopifyAppBridge && host);
+    if (ok) return fn();
+    if (tries <= 0) { console.warn('[SEOBoss] App Bridge not ready after retries'); return; }
+    setTimeout(()=>ready(fn, tries-1), 150);
+  }
+
+  // 1) Re-embed ONLY if we have host and we’re not already inside Admin
+  if (host && window.top === window.self) {
+    ready(() => {
+      try{
+        const app = window.ShopifyAppBridge.createApp({
+          apiKey: '5654f5c575452aefdca2592d2a2d1f3d', // public client id
+          host
+        });
+        const Redirect = window.ShopifyAppBridge.actions.Redirect;
+        // Send the SAME URL back through Admin so it loads embedded
+        Redirect.create(app).dispatch(Redirect.Action.REMOTE, location.href);
+      } catch(e){
+        console.warn('[SEOBoss] Re-embed failed; continuing standalone', e);
+      }
+    });
+  }
+
+  // 2) If embedded, expose an authenticated fetch with session token
+  if (host && window.top !== window.self) {
+    ready(() => {
+      try{
+        const app = window.ShopifyAppBridge.createApp({
+          apiKey: '5654f5c575452aefdca2592d2a2d1f3d',
+          host
+        });
+        const utils = window.appBridgeUtils || window.ShopifyAppBridgeUtils || {};
+        const getSessionToken = utils.getSessionToken;
+
+        if (typeof getSessionToken === 'function') {
+          window.SEO_BOSS_FETCH = async (url, payload) => {
+            const token = await getSessionToken(app);
+            return fetch(url, {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+              },
+              body: JSON.stringify(payload || {})
+            });
+          };
+        }
+        window.__SEOBOSS_EMBEDDED__ = true;
+      } catch(e){
+        console.warn('[SEOBoss] Embedded init failed', e);
+      }
+    });
+  }
+})();
+</script>
+
 
   <style>
     html, body { margin:0; padding:0; background:#0A0F0D; color:#fff; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; overflow-x:hidden }
