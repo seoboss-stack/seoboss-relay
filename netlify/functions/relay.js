@@ -2,6 +2,19 @@
 import crypto from "crypto";
 import { errlog } from "./_lib/_errlog.mjs";
 
+/**
+ * ENV REQUIRED
+ * - FORWARD_SECRET
+ * - PUBLIC_HMAC_KEY
+ * - N8N_* endpoint URLs per ROUTE_MAP below
+ *
+ * OPTIONAL
+ * - DEBUG_RELAY = "1"
+ */
+
+const DEBUG = process.env.DEBUG_RELAY === "1";
+const MAX_BODY = 1_000_000; // ~1MB guard
+
 // ===== Allowed origins (add your hosts here) =====
 const STATIC_ALLOW = new Set([
   "https://seoboss.com",
@@ -17,7 +30,7 @@ function isAllowedOrigin(origin) {
   catch { return false; }
 }
 
-// ===== Route map (unchanged) =====
+// ===== Route map (your existing n8n webhooks) =====
 const ROUTE_MAP = {
   // Engine
   "/seoboss/api/hints":                "N8N_HINTS_URL",
@@ -34,30 +47,30 @@ const ROUTE_MAP = {
   "/seoboss/api/shop/blogs":           "N8N_SHOP_LIST_BLOGS_URL",
   "/seoboss/api/shop/import-articles": "N8N_SHOP_IMPORT_URL",
 
-  // Provider (Shopify webhooks etc.) — skips browser HMAC
+  // Provider (Shopify webhooks etc.) — skips browser HMAC/origin checks
   "/seoboss/api/shopify":              "N8N_SHOPIFY_URL",
 };
-
-const DEBUG = process.env.DEBUG_RELAY === "1";
-const MAX_BODY = 1_000_000; // ~1MB guard
 
 function isProviderRoute(path) {
   return path === "/seoboss/api/shopify";
 }
 
 function timingSafeEqHex(hexA, hexB) {
-  const A = Buffer.from(String(hexA || ""), "hex");
-  const B = Buffer.from(String(hexB || ""), "hex");
-  return A.length === B.length && crypto.timingSafeEqual(A, B);
+  try {
+    const A = Buffer.from(String(hexA || ""), "hex");
+    const B = Buffer.from(String(hexB || ""), "hex");
+    return A.length === B.length && crypto.timingSafeEqual(A, B);
+  } catch { return false; }
 }
 
 function corsHeaders(origin, isProvider) {
-  if (isProvider) return {}; // providers manage their own auth
+  if (isProvider) return {}; // Providers (Shopify) manage their own auth; no browser CORS needed
   if (!origin) return {};
   return {
     "Access-Control-Allow-Origin": origin,
     "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+    "Access-Control-Allow-Headers":
+      "Content-Type, Authorization, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
     "Access-Control-Allow-Credentials": "true",
     "Vary": "Origin",
   };
@@ -87,7 +100,9 @@ function readBearer(event) {
   return m ? m[1] : "";
 }
 function b64urlDecode(s = "") {
-  return Buffer.from(s.replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8");
+  let t = s.replace(/-/g, "+").replace(/_/g, "/");
+  while (t.length % 4) t += "="; // padding
+  return Buffer.from(t, "base64").toString("utf8");
 }
 function decodeShopifyJWT(jwt) {
   const parts = String(jwt || "").split(".");
@@ -96,6 +111,15 @@ function decodeShopifyJWT(jwt) {
   const dest = String(payload.dest || "").replace(/^https?:\/\//, "").toLowerCase();
   if (!dest || !/\.myshopify\.com$/i.test(dest)) throw new Error("bad_dest");
   return { shop: dest, payload };
+}
+
+// ---- Canonical form encoder (sorted keys, scalar values only) ----
+function toCanonicalForm(obj) {
+  const entries = Object.entries(obj || {})
+    .filter(([_, v]) => v !== undefined && v !== null && typeof v !== "object" && String(v).trim() !== "")
+    .map(([k, v]) => [String(k), String(v)]);
+  entries.sort((a, b) => a[0].localeCompare(b[0]));
+  return entries.map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v)).join("&");
 }
 
 export const handler = async (event) => {
@@ -117,7 +141,8 @@ export const handler = async (event) => {
       headers: {
         "Access-Control-Allow-Origin": allow,
         "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
+        "Access-Control-Allow-Headers":
+          "Content-Type, Authorization, X-Seoboss-Ts, X-Seoboss-Hmac, X-Seoboss-Key-Id",
         "Access-Control-Max-Age": "600",
         "Vary": "Origin",
         ...securityHeaders(),
@@ -143,9 +168,8 @@ export const handler = async (event) => {
     return json(404, { ok: false, error: "unknown_route", path }, origin, provider);
   }
 
-  // ----- GET→POST (optional convenience) -----
+  // ----- GET→POST shim (convenience for flows expecting POST) -----
   if (event.httpMethod === "GET") {
-    // Convert querystring to x-www-form-urlencoded body for n8n flows that expect POST
     try {
       const u = new URL(event.rawUrl || `https://x${event.path}`);
       event.body = u.searchParams.toString();
@@ -166,7 +190,7 @@ export const handler = async (event) => {
   }
 
   // ----- Body guard -----
-  const raw = event.body || "";
+  let raw = event.body || "";
   if (raw.length > MAX_BODY) {
     console.log(`[relay] rid=${rid} 413 payload_too_large len=${raw.length}`);
     return json(413, { ok: false, error: "payload_too_large" }, origin, provider);
@@ -186,64 +210,74 @@ export const handler = async (event) => {
     }
   }
 
-  // ----- HMAC verify (legacy) OR server-sign (embedded) -----
-  // Legacy path: validate client-provided HMAC
-  if (!provider && !embeddedMode) {
-    const tsHeader = event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"];
-    const hmacHeader = (event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "").toLowerCase();
+  // ----- If JSON from browser, convert to form BEFORE signing -----
+  let contentType =
+    event.headers?.["content-type"] ||
+    event.headers?.["Content-Type"] ||
+    "application/x-www-form-urlencoded";
 
-    const ts = parseInt(tsHeader || "0", 10);
+  if (!provider && /application\/json/i.test(contentType)) {
+    try {
+      const obj = JSON.parse(raw || "{}");
+
+      // If embedded and "shop" is absent, inject from JWT
+      if (embeddedMode && !obj.shop && embeddedShop) obj.shop = embeddedShop;
+
+      raw = toCanonicalForm(obj); // sorted & encoded
+      contentType = "application/x-www-form-urlencoded";
+    } catch {
+      // keep JSON if parse fails
+    }
+  } else if (embeddedMode && /application\/x-www-form-urlencoded/i.test(contentType)) {
+    // If embedded + form body but missing shop, inject it to help flows
+    if (embeddedShop && !/(^|&)shop=/.test(raw)) {
+      raw += (raw ? "&" : "") + "shop=" + encodeURIComponent(embeddedShop);
+    }
+  }
+
+  // ----- HMAC verify (legacy) OR server-sign (embedded) -----
+  let xTs = event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "";
+  let xHmac = event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "";
+  let xKeyId = event.headers["x-seoboss-key-id"] || event.headers["X-Seoboss-Key-Id"] || "global";
+
+  if (!provider && !embeddedMode) {
+    // LEGACY: validate client-provided HMAC + timestamp
+    const ts = parseInt(xTs || "0", 10);
     if (!ts || Math.abs(Date.now() / 1000 - ts) > 300) {
-      console.log(`[relay] rid=${rid} 401 stale_ts ts=${tsHeader || "-"}`);
+      console.log(`[relay] rid=${rid} 401 stale_ts ts=${xTs || "-"}`);
       return json(401, { ok: false, error: "stale_or_missing_timestamp" }, origin, provider);
     }
-    if (!hmacHeader || !process.env.PUBLIC_HMAC_KEY) {
+    if (!xHmac || !process.env.PUBLIC_HMAC_KEY) {
       console.log(`[relay] rid=${rid} 401 missing_hmac`);
       return json(401, { ok: false, error: "missing_hmac_or_key" }, origin, provider);
     }
-
     const expected = crypto.createHmac("sha256", process.env.PUBLIC_HMAC_KEY)
       .update(raw + "\n" + ts)
       .digest("hex");
-
-    if (!timingSafeEqHex(expected, hmacHeader)) {
-      if (DEBUG) console.error(`[relay] rid=${rid} 401 bad_sig exp=${expected.slice(0,8)} got=${hmacHeader.slice(0,8)}`);
+    if (!timingSafeEqHex(expected, String(xHmac).toLowerCase())) {
+      if (DEBUG) console.error(`[relay] rid=${rid} 401 bad_sig exp=${expected.slice(0,8)} got=${String(xHmac).slice(0,8)}`);
       return json(401, { ok: false, error: "bad_signature" }, origin, provider);
     }
   }
 
-  // ----- Forward to n8n (with server-side signing for embedded) -----
+  if (!provider && embeddedMode) {
+    // EMBEDDED: browser must not sign; we sign here
+    xTs = String(Math.floor(Date.now() / 1000));
+    xKeyId = "global";
+    xHmac = process.env.PUBLIC_HMAC_KEY
+      ? crypto.createHmac("sha256", process.env.PUBLIC_HMAC_KEY).update(raw + "\n" + xTs).digest("hex")
+      : "";
+  }
+
+  // ----- Forward to n8n -----
   try {
-    const ct =
-      event.headers["content-type"] ||
-      event.headers["Content-Type"] ||
-      "application/x-www-form-urlencoded";
-
-    // prepare upstream signing headers
-    let xTs = event.headers["x-seoboss-ts"] || event.headers["X-Seoboss-Ts"] || "";
-    let xHmac = event.headers["x-seoboss-hmac"] || event.headers["X-Seoboss-Hmac"] || "";
-    let xKeyId = event.headers["x-seoboss-key-id"] || event.headers["X-Seoboss-Key-Id"] || "global";
-
-    if (!provider && embeddedMode) {
-      // Browser didn't (and mustn't) sign. Sign here.
-      xTs = String(Math.floor(Date.now() / 1000));
-      xKeyId = "global";
-      if (process.env.PUBLIC_HMAC_KEY) {
-        xHmac = crypto.createHmac("sha256", process.env.PUBLIC_HMAC_KEY)
-          .update(raw + "\n" + xTs)
-          .digest("hex");
-      } else {
-        xHmac = "";
-      }
-    }
-
     const controller = new AbortController();
     const t = setTimeout(() => controller.abort(), 60_000);
 
     const resp = await fetch(upstream, {
       method: "POST",
       headers: {
-        "Content-Type": ct,
+        "Content-Type": contentType || "application/x-www-form-urlencoded",
         "Accept": "application/json",
         "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
         "X-Seoboss-Ts": xTs,
@@ -271,14 +305,14 @@ export const handler = async (event) => {
     }
 
     const text = await resp.text();
-    const contentType = resp.headers.get("content-type") || "application/json";
+    const contentTypeUp = resp.headers.get("content-type") || "application/json";
 
     console.log(`[relay] rid=${rid} upstream=${resp.status} dur_ms=${Date.now() - started}`);
 
     return {
       statusCode: resp.status,
       headers: {
-        "Content-Type": contentType,
+        "Content-Type": contentTypeUp,
         ...securityHeaders(),
         ...corsHeaders(origin, provider),
       },
