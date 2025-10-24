@@ -235,33 +235,42 @@
           Client: <code id="clientIdDisplay">—</code>
         </small>
         <h2>👑 SEOBoss — Connect Your Store</h2>
-        <p class="sub">We'll discover your blogs and set up your workspace. No admin token needed!</p>
+        <p class="sub">We'll discover your blogs and set up your workspace. Your Admin token is used <em>only</em> during onboarding.</p>
       </div>
 
       <div id="onboardWrap">
         <form id="bossForm" novalidate>
           <input id="clientIdHidden" type="hidden" value="">
 
-          <!-- Shop (auto-filled from URL) -->
+          <!-- Shop & Token -->
           <div class="row two">
             <div>
               <label>Shopify Store</label>
               <input id="shopInput" placeholder="yourstore.myshopify.com" required disabled>
               <small>Auto-filled from your Shopify admin</small>
             </div>
+            <div id="tokenRow" style="display:none;">
+              <label>Admin API Access Token</label>
+              <input id="adminToken" placeholder="shpat_…" type="password">
+              <small>Optional - Shopify provides this automatically for embedded apps</small>
+            </div>
+          </div>
+
+          <!-- Email & Language -->
+          <div class="row two">
             <div>
               <label>Contact Email</label>
               <input id="contactEmail" type="email" placeholder="owner@example.com" required>
               <small>Where should we send important updates?</small>
             </div>
-          </div>
-
-          <!-- Language & Settings -->
-          <div class="row two">
             <div>
               <label>Language</label>
               <input id="defaultLanguage" placeholder="en" value="en" required>
             </div>
+          </div>
+
+          <!-- Tone & Niche -->
+          <div class="row two">
             <div>
               <label>Tone</label>
               <input id="toneInput" placeholder="Helpful, expert, no hype">
@@ -478,6 +487,7 @@
   
   const el = {
     shopInput: $('shopInput'),
+    adminToken: $('adminToken'),
     contactEmail: $('contactEmail'),
     defaultLanguage: $('defaultLanguage'),
     tone: $('toneInput'),
@@ -714,6 +724,7 @@
     const contactEmail = (el.contactEmail.value || '').trim();
     const defaultLanguage = (el.defaultLanguage.value || 'en').trim().toLowerCase();
     const shopInput = (el.shopInput.value || '').trim().toLowerCase();
+    const adminToken = (el.adminToken?.value || '').trim();
     const tone = (el.tone.value || '').trim();
     const niche = (el.niche.value || '').trim();
     const seedKeywords = (el.seedKeywords.value || '').trim();
@@ -730,19 +741,26 @@
     const existingClient = store.read();
     const isUpdate = existingClient && existingClient.id;
     
-    // Prepare payload
+    // Prepare payload - MATCH OLD LIQUID FILE FORMAT FOR N8N!
+    // Note: In embedded apps, Shopify provides admin_token via OAuth
+    // Backend derives client_id from shop_input (e.g. "seoboss-engine.myshopify.com" -> "cli_seoboss-engine")
     const payload = {
-      client_id: existingClient?.id || el.clientIdHidden.value || '',
-      shop: shopInput,
-      contact_email: maybe(contactEmail),
-      default_language: maybe(defaultLanguage),
-      tone: maybe(tone),
-      niche: maybe(niche),
-      seed_keywords: maybe(seedKeywords),
-      target_audience: maybe(targetAudience),
+      client_name: '',  // n8n expects this
+      contact_email: contactEmail,
+      default_language: defaultLanguage,
+      shop_input: shopInput,  // n8n uses this to derive client_id!
+      admin_token: adminToken || '',  // Optional in embedded mode - Shopify provides via OAuth
+      tone: tone,
+      niche: niche,
+      seed_keywords: seedKeywords,
+      target_audience: targetAudience,
       ...(defaultBlogId ? { default_blog_id: defaultBlogId } : {}),
+      ...(isUpdate && existingClient?.id ? { client_id: existingClient.id } : {}),
       idem: crypto.randomUUID ? crypto.randomUUID() : String(Date.now())
     };
+    
+    console.log('[SEOBoss] Prepared payload for n8n:', payload);
+    console.log('[SEOBoss] shop_input:', payload.shop_input, '(backend will derive client_id from this)');
     
     const endpoint = isUpdate ? updateURL : submitURL;
     if (!endpoint) {
@@ -784,14 +802,19 @@
         throw new Error(data?.message || data?.raw || response.statusText || 'Request failed');
       }
       
-      // Extract client ID - try different possible field names
+      // Extract client ID - try different possible field names or derive from shop
       const clientId = data.client_id || data.clientId || data.id || existingClient?.id || '';
       
-      console.log('[SEOBoss] Extracted client ID:', clientId);
+      // If backend didn't return client_id, it might expect us to derive it from shop
+      // Pattern: "seoboss-engine.myshopify.com" -> "cli_seoboss-engine"
+      const derivedClientId = clientId || (shopInput ? `cli_${shopInput.split('.')[0]}` : '');
       
-      // Save client profile
+      console.log('[SEOBoss] Extracted client ID:', clientId);
+      console.log('[SEOBoss] Derived client ID from shop:', derivedClientId);
+      
+      // Save client profile - use derived ID if backend didn't provide one
       const profile = {
-        id: clientId,
+        id: derivedClientId,
         shop_url: data.shop_url || data.shop || shopInput,
         default_blog_id: data.default_blog_id || defaultBlogId || '',
         language: defaultLanguage,
