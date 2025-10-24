@@ -60,6 +60,13 @@ force = true
   to = "/.netlify/functions/whoami"
   status = 200
 
+# NEW: onboarding save endpoint (browser -> Netlify function)
+[[redirects]]
+  from = "/seoboss/api/onboard-save"
+  to   = "/.netlify/functions/onboard-save"
+  status = 200
+  force = true
+
 # Catch-all relay for SEOBoss API
 [[redirects]]
   from = "/seoboss/api/*"
