@@ -5,228 +5,45 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SEOBoss — Connect Your Store</title>
 
-  <!-- Shopify App Bridge v3 -->
+  <!-- Shopify App Bridge UMD -->
   <script src="https://unpkg.com/@shopify/app-bridge@3.7.10/umd/index.js"></script>
   <script src="https://unpkg.com/@shopify/app-bridge-utils@3.7.10/umd/index.js"></script>
 
   <style>
-    html, body {
-      margin: 0;
-      padding: 0;
-      background: #0A0F0D;
-      color: #fff;
-      font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
-      overflow-x: hidden;
-    }
-    
-    /* SEOBoss Custom Styles */
-    #seoboss-onboarding {
-      --mint: #00f5d4;
-      --blue: #00bbf9;
-      --ink: #e0ffe9;
-      --bgA: #0f0c29;
-      --bgB: #302b63;
-      --bgC: #24243e;
-      background: linear-gradient(270deg, var(--bgA), var(--bgB), var(--bgC));
-      background-size: 600% 600%;
-      animation: soGrad 20s ease infinite;
-      min-height: 100vh;
-      padding: 1rem 0;
-    }
-    
-    @keyframes soGrad {
-      0% { background-position: 0% 50%; }
-      50% { background-position: 100% 50%; }
-      100% { background-position: 0% 50%; }
-    }
-    
-    .wrap {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 1.2rem;
-    }
-    
-    .panel {
-      margin: 1.4rem auto;
-      padding: 1.4rem;
-      border-radius: 18px;
-      background: linear-gradient(135deg, var(--bgA), var(--bgB) 60%, var(--bgA));
-      box-shadow: 0 0 36px rgba(0, 245, 212, 0.22);
-    }
-    
-    .head h2 {
-      margin: 0.2rem 0 0.3rem;
-      color: var(--mint);
-      text-shadow: 0 0 10px rgba(0, 255, 200, 0.6);
-    }
-    
-    .head .sub {
-      color: #cfefff;
-    }
-    
-    .status {
-      font-weight: 700;
-      margin-bottom: 0.4rem;
-    }
-    
-    .dot {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--mint);
-      display: inline-block;
-      margin-right: 8px;
-      box-shadow: 0 0 12px rgba(0, 255, 200, 0.8);
-      animation: pulse 1.8s infinite;
-    }
-    
-    @keyframes pulse {
-      0%, 100% { transform: scale(0.9); }
-      50% { transform: scale(1.1); }
-    }
-    
-    label {
-      font-weight: 800;
-      color: #eafff7;
-      display: block;
-      margin-bottom: 0.4rem;
-    }
-    
-    small {
-      color: #a0ffd7;
-      display: block;
-      margin-top: 0.3rem;
-    }
-    
-    input, select, textarea {
-      width: 100%;
-      padding: 0.9rem 1rem;
-      border-radius: 12px;
-      border: 1px solid rgba(255, 255, 255, 0.16);
-      background: rgba(255, 255, 255, 0.08);
-      color: #fff;
-      box-sizing: border-box;
-      font-family: inherit;
-      font-size: 1rem;
-    }
-    
-    input:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-    
-    textarea {
-      min-height: 50px;
-      resize: vertical;
-    }
-    
-    .row {
-      display: flex;
-      flex-direction: column;
-      gap: 0.6rem;
-      background: rgba(255, 255, 255, 0.06);
-      padding: 1rem;
-      border: 1px solid rgba(255, 255, 255, 0.09);
-      border-radius: 12px;
-      margin: 0.8rem 0;
-    }
-    
-    .row.two {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-    
-    .actions {
-      display: flex;
-      gap: 0.6rem;
-      margin-top: 0.4rem;
-      flex-wrap: wrap;
-    }
-    
-    .btn {
-      padding: 0.9rem 1.1rem;
-      border-radius: 12px;
-      font-weight: 900;
-      cursor: pointer;
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      color: #eafff7;
-      background: rgba(255, 255, 255, 0.06);
-      text-decoration: none;
-      display: inline-block;
-      font-family: inherit;
-      font-size: 1rem;
-      transition: all 0.2s;
-    }
-    
-    .btn:hover {
-      background: rgba(255, 255, 255, 0.12);
-    }
-    
-    .btn.primary {
-      background: linear-gradient(90deg, var(--mint), var(--blue));
-      color: #062621;
-      border: none;
-      box-shadow: 0 0 16px rgba(0, 255, 200, 0.35);
-    }
-    
-    .btn:disabled {
-      opacity: 0.5;
-      cursor: not-allowed;
-    }
-    
-    .btn.outline {
-      background: transparent;
-      border: 2px solid var(--mint);
-    }
-    
-    .card {
-      margin: 1rem 0;
-      padding: 1rem;
-      border-radius: 12px;
-      background: rgba(255, 255, 255, 0.08);
-      color: #e9fbff;
-      box-shadow: 0 0 20px rgba(0, 255, 200, 0.24);
-    }
-    
-    .saved {
-      display: flex;
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 0.6rem;
-      color: #b9ffe9;
-    }
-    
-    code {
-      background: rgba(255, 255, 255, 0.08);
-      padding: 0.2rem 0.4rem;
-      border-radius: 6px;
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      font-family: 'Courier New', monospace;
-    }
-    
-    .msg {
-      display: block;
-      margin-top: 0.5rem;
-      font-size: 0.9rem;
-    }
-    
-    @media (max-width: 820px) {
-      .row.two {
-        grid-template-columns: 1fr;
-      }
-      .wrap {
-        padding: 1rem;
-      }
-    }
+    html, body { margin:0; padding:0; background:#0A0F0D; color:#fff; font-family:system-ui,-apple-system,'Segoe UI',Roboto,sans-serif; overflow-x:hidden }
+    #seoboss-onboarding { --mint:#00f5d4; --blue:#00bbf9; --ink:#e0ffe9; --bgA:#0f0c29; --bgB:#302b63; --bgC:#24243e;
+      background:linear-gradient(270deg,var(--bgA),var(--bgB),var(--bgC)); background-size:600% 600%; animation:soGrad 20s ease infinite; min-height:100vh; padding:1rem 0 }
+    @keyframes soGrad { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }
+    .wrap{ max-width:980px; margin:0 auto; padding:1.2rem }
+    .panel{ margin:1.4rem auto; padding:1.4rem; border-radius:18px; background:linear-gradient(135deg,var(--bgA),var(--bgB) 60%,var(--bgA)); box-shadow:0 0 36px rgba(0,245,212,.22) }
+    .head h2{ margin:.2rem 0 .3rem; color:var(--mint); text-shadow:0 0 10px rgba(0,255,200,.6) }
+    .head .sub{ color:#cfefff }
+    .status{ font-weight:700; margin-bottom:.4rem }
+    .dot{ width:12px; height:12px; border-radius:50%; background:var(--mint); display:inline-block; margin-right:8px; box-shadow:0 0 12px rgba(0,255,200,.8); animation:pulse 1.8s infinite }
+    @keyframes pulse{0%,100%{transform:scale(.9)}50%{transform:scale(1.1)}}
+    label{ font-weight:800; color:#eafff7; display:block; margin-bottom:.4rem }
+    small{ color:#a0ffd7; display:block; margin-top:.3rem }
+    input,select,textarea{ width:100%; padding:.9rem 1rem; border-radius:12px; border:1px solid rgba(255,255,255,.16); background:rgba(255,255,255,.08); color:#fff; box-sizing:border-box; font:inherit }
+    input:disabled{ opacity:.6; cursor:not-allowed }
+    textarea{ min-height:50px; resize:vertical }
+    .row{ display:flex; flex-direction:column; gap:.6rem; background:rgba(255,255,255,.06); padding:1rem; border:1px solid rgba(255,255,255,.09); border-radius:12px; margin:.8rem 0 }
+    .row.two{ display:grid; grid-template-columns:1fr 1fr; gap:1rem }
+    .actions{ display:flex; gap:.6rem; margin-top:.4rem; flex-wrap:wrap }
+    .btn{ padding:.9rem 1.1rem; border-radius:12px; font-weight:900; cursor:pointer; border:1px solid rgba(255,255,255,.14); color:#eafff7; background:rgba(255,255,255,.06); text-decoration:none; display:inline-block; transition:.2s }
+    .btn:hover{ background:rgba(255,255,255,.12) }
+    .btn.primary{ background:linear-gradient(90deg,var(--mint),var(--blue)); color:#062621; border:none; box-shadow:0 0 16px rgba(0,255,200,.35) }
+    .btn:disabled{ opacity:.5; cursor:not-allowed }
+    .btn.outline{ background:transparent; border:2px solid var(--mint) }
+    .card{ margin:1rem 0; padding:1rem; border-radius:12px; background:rgba(255,255,255,.08); color:#e9fbff; box-shadow:0 0 20px rgba(0,255,200,.24) }
+    .saved{ display:flex; flex-direction:column; align-items:flex-start; gap:.6rem; color:#b9ffe9 }
+    code{ background:rgba(255,255,255,.08); padding:.2rem .4rem; border-radius:6px; border:1px solid rgba(255,255,255,.14); font-family:ui-monospace, SFMono-Regular, Menlo, monospace }
+    .msg{ display:block; margin-top:.5rem; font-size:.9rem }
+    @media (max-width:820px){ .row.two{ grid-template-columns:1fr } .wrap{ padding:1rem } }
   </style>
 </head>
 <body>
 
-<div id="seoboss-onboarding"
-     data-onboard-submit="https://hooks.seoboss.com/seoboss/api/onboarding/submit"
-     data-update-profile="https://hooks.seoboss.com/seoboss/api/client/profile"
-     data-engine-install="https://hooks.seoboss.com/seoboss/api/engine/install">
+<div id="seoboss-onboarding">
   <div class="wrap">
     <div class="panel">
       <div class="head">
@@ -235,24 +52,19 @@
           Client: <code id="clientIdDisplay">—</code>
         </small>
         <h2>👑 SEOBoss — Connect Your Store</h2>
-        <p class="sub">We'll discover your blogs and set up your workspace. Your Admin token is used <em>only</em> during onboarding.</p>
+        <p class="sub">We’ll discover your blogs and set up your workspace. The Admin token is exchanged securely during install (never exposed to the browser).</p>
       </div>
 
       <div id="onboardWrap">
         <form id="bossForm" novalidate>
           <input id="clientIdHidden" type="hidden" value="">
 
-          <!-- Shop & Token -->
+          <!-- Shop (auto) -->
           <div class="row two">
             <div>
               <label>Shopify Store</label>
               <input id="shopInput" placeholder="yourstore.myshopify.com" required disabled>
               <small>Auto-filled from your Shopify admin</small>
-            </div>
-            <div id="tokenRow" style="display:none;">
-              <label>Admin API Access Token</label>
-              <input id="adminToken" placeholder="shpat_…" type="password">
-              <small>Optional - Shopify provides this automatically for embedded apps</small>
             </div>
           </div>
 
@@ -275,20 +87,17 @@
               <label>Tone</label>
               <input id="toneInput" placeholder="Helpful, expert, no hype">
             </div>
-          </div>
-
-          <div class="row two">
             <div>
               <label>Niche</label>
               <input id="nicheInput" placeholder="e.g., vocal health, natural energy drinks">
             </div>
+          </div>
+
+          <div class="row two">
             <div>
               <label>Seed keywords (comma-separated)</label>
               <textarea id="seedKeywords" rows="3" placeholder="natural energy drink, manuka honey beverage"></textarea>
             </div>
-          </div>
-
-          <div class="row">
             <div>
               <label>Target audience</label>
               <textarea id="targetAudience" rows="3" placeholder="Adults 45+, singers, wellness shoppers"></textarea>
@@ -318,23 +127,19 @@
 
         <!-- Interlinking import -->
         <div id="interlinkingCard" class="card" style="display:none">
-          <div style="font-weight:800; margin-bottom:0.4rem;">📚 Import Existing Posts</div>
-          <p style="margin:0.2rem 0 0.8rem">
-            Import your current blog posts into your workspace for better interlinking.
-          </p>
+          <div style="font-weight:800; margin-bottom:.4rem;">📚 Import Existing Posts</div>
+          <p style="margin:.2rem 0 .8rem">Import your current blog posts into your workspace for better interlinking.</p>
           <div class="actions">
             <button id="importArticlesBtn" class="btn outline">Fetch existing posts</button>
           </div>
           <small id="importMsg" class="msg"></small>
-          <div id="importPreview" style="margin-top:0.6rem"></div>
+          <div id="importPreview" style="margin-top:.6rem"></div>
         </div>
 
         <!-- Try the engine (workspace sheet) -->
         <div id="engineCard" class="card" style="display:none">
-          <div style="font-weight:800; margin-bottom:0.4rem;">🚀 Try Your Content Engine</div>
-          <p style="margin:0.2rem 0 0.8rem">
-            Open your workspace to generate briefs, outlines, and internal links.
-          </p>
+          <div style="font-weight:800; margin-bottom:.4rem;">🚀 Try Your Content Engine</div>
+          <p style="margin:.2rem 0 .8rem">Open your workspace to generate briefs, outlines, and internal links.</p>
           <div class="actions">
             <a id="openSheetBtn" href="#" target="_blank" rel="noopener" class="btn primary">🔗 Open workspace</a>
           </div>
@@ -343,18 +148,16 @@
 
         <!-- Install engine on store -->
         <div id="installCard" class="card" style="display:none">
-          <div style="font-weight:800; margin-bottom:0.4rem;">⚙️ Install Engine</div>
-          <p style="margin:0.2rem 0 0.8rem">
-            Add the console to your theme automatically, or copy the embed snippet.
-          </p>
+          <div style="font-weight:800; margin-bottom:.4rem;">⚙️ Install Engine</div>
+          <p style="margin:.2rem 0 .8rem">Add the console to your theme automatically, or copy the embed snippet.</p>
           <div class="actions">
             <button id="installThemeBtn" class="btn primary">⚙️ Add to Theme</button>
             <button id="copySnippetBtn" class="btn">📋 Copy snippet</button>
             <a id="openConsoleBtn" class="btn outline" target="_blank" rel="noopener">🔎 Open console</a>
           </div>
-          <details id="snippetBox" style="margin-top:0.6rem">
+          <details id="snippetBox" style="margin-top:.6rem">
             <summary>Show embed snippet</summary>
-            <textarea id="embedSnippet" rows="6" readonly style="width:100%; margin-top:0.4rem"></textarea>
+            <textarea id="embedSnippet" rows="6" readonly style="width:100%; margin-top:.4rem"></textarea>
             <small>Paste into a Liquid section or page.</small>
           </details>
           <small id="installMsg" class="msg"></small>
@@ -366,128 +169,53 @@
 </div>
 
 <script>
-(function() {
+(function(){
   'use strict';
-  
-  // ============================================
-  // 1. SHOPIFY APP BRIDGE INITIALIZATION
-  // ============================================
-  const urlParams = new URLSearchParams(window.location.search);
-  const host = urlParams.get('host') || '';
-  const shop = (urlParams.get('shop') || '').toLowerCase();
-  const apiKey = '5654f5c575452aefdca2592d2a2d1f3d'; // Your API key from partner dashboard
-  
-  console.log('[SEOBoss] Initializing embedded app...', { shop, host });
-  
-  // Initialize App Bridge
-  let app = null;
-  let isEmbedded = false;
-  
-  if (host && shop) {
-    try {
-      app = window.createApp({
-        apiKey: apiKey,
-        host: host,
-      });
-      isEmbedded = true;
-      console.log('[SEOBoss] App Bridge initialized successfully');
-    } catch (e) {
-      console.error('[SEOBoss] App Bridge initialization failed:', e);
-    }
-  } else {
-    console.warn('[SEOBoss] Missing host or shop parameter - not embedded');
-  }
-  
-  // Session token helper for authenticated API calls
+
+  // ============= 1) App Bridge =============
+  const qs = new URLSearchParams(location.search);
+  const hostParam = qs.get('host') || '';
+  const apiKey = 'YOUR_PUBLIC_API_KEY'; // <-- set your public app key
+
+  const AppBridge = window.appBridge;
+  const AppBridgeUtils = window.appBridgeUtils;
+
+  if (!AppBridge) console.error('[SEOBoss] App Bridge UMD not loaded');
+  if (!AppBridgeUtils) console.error('[SEOBoss] App Bridge Utils UMD not loaded');
+
+  const app = (hostParam && AppBridge) ? AppBridge.createApp({ apiKey, host: hostParam }) : null;
+
   async function getSessionToken() {
-    if (!app || !window.getSessionToken) {
-      throw new Error('App Bridge not initialized or session token unavailable');
-    }
-    return await window.getSessionToken(app);
+    if (!app || !AppBridgeUtils?.getSessionToken) throw new Error('App Bridge not ready');
+    return await AppBridgeUtils.getSessionToken(app);
   }
-  
-  // Authenticated fetch helper
-  async function authenticatedFetch(url, options = {}) {
+
+  // Optional: ensure we’re inside Admin iframe
+  try {
+    const Redirect = AppBridge?.actions?.Redirect;
+    if (app && Redirect && window.top === window.self) {
+      Redirect.create(app).dispatch(Redirect.Action.ADMIN_PATH, '/apps/your-app-slug');
+    }
+  } catch {}
+
+  // ============= 2) Authenticated fetch (backend owns secrets) =============
+  async function shopifyAuthorizedFetch(path, init = {}) {
     const token = await getSessionToken();
-    return fetch(url, {
-      ...options,
+    return fetch(path, {
+      ...init,
       headers: {
-        ...options.headers,
         'Authorization': `Bearer ${token}`,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      }
+        'Accept': 'application/json',
+        ...(init.headers || {}),
+      },
+      credentials: 'include'
     });
   }
-  
-  // ============================================
-  // 2. AUTHENTICATION HELPERS
-  // ============================================
-  // IMPORTANT: These must match your Netlify environment variables
-  const FORWARD_SECRET = 'G9dk82nN2mX7pQb4vT!sZy';  // Must match FORWARD_SECRET in Netlify
-  const HMAC_KEY = 'SEOBOSSSECRET_2025';             // Must match PUBLIC_HMAC_KEY in Netlify
-  
-  // Canonicalize form data for HMAC signing
-  function canonicalForm(obj) {
-    const entries = Object.entries(obj || {})
-      .filter(([_, v]) => v !== undefined && v !== null && String(v).trim() !== '')
-      .map(([k, v]) => [String(k), String(v)]);
-    entries.sort((a, b) => a[0].localeCompare(b[0]));
-    return entries.map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
-  }
-  
-  // Generate HMAC signature
-  async function hmacHex(secret, message) {
-    const enc = new TextEncoder();
-    const key = await crypto.subtle.importKey('raw', enc.encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const sig = await crypto.subtle.sign('HMAC', key, enc.encode(message));
-    return [...new Uint8Array(sig)].map(b => b.toString(16).padStart(2, '0')).join('');
-  }
-  
-  // Create signed headers for relay authentication
-  async function createAuthHeaders(payload) {
-    const body = canonicalForm(payload);
-    const timestamp = Math.floor(Date.now() / 1000).toString();
-    const hmac = await hmacHex(HMAC_KEY, body + '\n' + timestamp);
-    
-    return {
-      'X-SEOBOSS-FORWARD-SECRET': FORWARD_SECRET,
-      'X-Seoboss-Ts': timestamp,
-      'X-Seoboss-Hmac': hmac,
-      'X-Seoboss-Key-Id': 'global'
-    };
-  }
-  
-  // ============================================
-  // 3. LOCAL STORAGE HELPER
-  // ============================================
-  const store = {
-    key: 'seoboss_client',
-    read() {
-      try {
-        const raw = localStorage.getItem(this.key);
-        return raw ? JSON.parse(raw) : null;
-      } catch {
-        return null;
-      }
-    },
-    save(data) {
-      try {
-        localStorage.setItem(this.key, JSON.stringify(data));
-      } catch (e) {
-        console.warn('[SEOBoss] Could not save to localStorage', e);
-      }
-    }
-  };
-  
-  // ============================================
-  // 3. DOM ELEMENTS
-  // ============================================
-  const $ = (id) => document.getElementById(id);
-  
+
+  // ============= 3) DOM refs & helpers =============
+  const $ = (id)=> document.getElementById(id);
   const el = {
     shopInput: $('shopInput'),
-    adminToken: $('adminToken'),
     contactEmail: $('contactEmail'),
     defaultLanguage: $('defaultLanguage'),
     tone: $('toneInput'),
@@ -514,418 +242,245 @@
     installThemeBtn: $('installThemeBtn'),
     copySnippetBtn: $('copySnippetBtn'),
     openConsoleBtn: $('openConsoleBtn'),
-    snippetBox: $('snippetBox'),
     embedSnippet: $('embedSnippet'),
     installMsg: $('installMsg')
   };
-  
   const statusDot = document.querySelector('.dot');
-  
-  // ============================================
-  // 4. UTILITIES
-  // ============================================
-  function setBusy(btn, busy, text) {
-    if (!btn) return;
-    btn.disabled = busy;
-    if (text) btn.textContent = text;
-  }
-  
-  function maybe(val) {
-    return val || undefined;
-  }
-  
-  async function readJSON(response) {
-    const text = await response.text();
-    if (!text) return {};
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { raw: text };
-    }
-  }
-  
-  function paintClientId(id) {
-    if (!id) return;
-    el.clientIdDisplay.textContent = id;
-    el.clientIdBadge.style.display = 'block';
-    el.clientIdHidden.value = id;
-  }
-  
-  // ============================================
-  // 5. INITIALIZATION
-  // ============================================
-  
-  // Auto-fill shop from URL
-  if (shop) {
-    el.shopInput.value = shop;
-  }
-  
-  // Load existing client data
-  const existingClient = store.read();
-  if (existingClient) {
-    if (existingClient.id) paintClientId(existingClient.id);
-    if (existingClient.language) el.defaultLanguage.value = existingClient.language;
-    if (existingClient.tone) el.tone.value = existingClient.tone;
-    if (existingClient.niche) el.niche.value = existingClient.niche;
-    if (existingClient.seed_keywords) el.seedKeywords.value = existingClient.seed_keywords;
-    if (existingClient.target_audience) el.targetAudience.value = existingClient.target_audience;
-    
-    el.statusText.textContent = 'Previously connected';
-    statusDot.style.background = '#00f5d4';
-    
-    // Show relevant cards
-    if (existingClient.sheet_url) {
-      el.openSheetBtn.href = existingClient.sheet_url;
-      el.engineCard.style.display = 'block';
-    }
-    
-    el.interlinkingCard.style.display = 'block';
-    showInstallCardIfReady();
-  }
-  
-  // ============================================
-  // 6. INSTALL CARD HELPERS
-  // ============================================
-  function showInstallCardIfReady() {
-    const client = store.read();
-    if (!client || !client.id || !client.shop_url) return;
-    
-    el.installCard.style.display = 'block';
-    
-    // Generate snippet
-    const snippet = `<div id="seoboss-console" 
-     data-client-id="${client.id}" 
-     data-shop="${client.shop_url}">
-</div>
-<script src="https://hooks.seoboss.com/console.js"><\/script>`;
-    
-    el.embedSnippet.value = snippet;
-    
+
+  const store = {
+    key: 'seoboss_client',
+    read(){ try{ return JSON.parse(localStorage.getItem(this.key) || 'null'); }catch{ return null; } },
+    save(d){ try{ localStorage.setItem(this.key, JSON.stringify(d)); }catch{} }
+  };
+
+  function setBusy(btn, busy, text){ if(!btn) return; btn.disabled = !!busy; if(text) btn.textContent = text; }
+  function paintClientId(id){ if(!id) return; el.clientIdDisplay.textContent = id; el.clientIdBadge.style.display='block'; el.clientIdHidden.value=id; }
+  function showInstallCardIfReady(){
+    const client = store.read(); if(!client?.id || !client?.shop_url) return;
+    el.installCard.style.display='block';
+    el.embedSnippet.value =
+`<div id="seoboss-console"
+     data-client-id="${client.id}"
+     data-shop="${client.shop_url}"></div>
+<script async src="https://seoboss.com/engine/widget.js"><\/script>`;
     const consoleUrl = `https://${client.shop_url}/pages/seoboss-console`;
     el.openConsoleBtn.href = consoleUrl;
   }
-  
-  // ============================================
-  // 7. EVENT HANDLERS
-  // ============================================
-  
-  // Copy snippet button
-  el.copySnippetBtn?.addEventListener('click', () => {
-    if (!el.embedSnippet) return;
-    el.embedSnippet.select();
-    document.execCommand('copy');
-    el.copySnippetBtn.textContent = '✓ Copied!';
-    setTimeout(() => {
-      el.copySnippetBtn.textContent = '📋 Copy snippet';
-    }, 2000);
-  });
-  
-  // Install to theme button
-  el.installThemeBtn?.addEventListener('click', async () => {
-    const client = store.read();
-    if (!client || !client.id || !client.shop_url) {
-      el.installMsg.textContent = 'No client data found';
-      return;
-    }
-    
-    const installUrl = document.querySelector('#seoboss-onboarding').dataset.engineInstall;
-    if (!installUrl) {
-      el.installMsg.textContent = 'Install endpoint not configured';
-      return;
-    }
-    
-    setBusy(el.installThemeBtn, true, 'Installing...');
-    el.installMsg.textContent = 'Adding to your theme...';
-    
+
+  // ============= 4) Derive shop from URL or JWT =============
+  (async function deriveShop(){
+    const shopFromUrl = (qs.get('shop') || '').toLowerCase();
+    if (shopFromUrl) { el.shopInput.value = shopFromUrl; return; }
     try {
-      const installPayload = {
-        client_id: client.id,
-        shop: client.shop_url
-      };
-      
-      // Create canonical form body for HMAC
-      const body = canonicalForm(installPayload);
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const hmac = await hmacHex(HMAC_KEY, body + '\n' + timestamp);
-      
-      const response = await fetch(installUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json',
-          'X-SEOBOSS-FORWARD-SECRET': FORWARD_SECRET,
-          'X-Seoboss-Ts': timestamp,
-          'X-Seoboss-Hmac': hmac,
-          'X-Seoboss-Key-Id': 'global'
-        },
-        body: body  // Send the canonical form string
-      });
-      
-      const data = await readJSON(response);
-      
-      if (!response.ok || data.ok === false) {
-        throw new Error(data?.message || data?.raw || 'Install failed');
+      const jwt = await getSessionToken();
+      const payload = JSON.parse(atob((jwt.split('.')[1]||'').replace(/-/g,'+').replace(/_/g,'/')));
+      const dest = (payload.dest || '').replace(/^https?:\/\//,'').toLowerCase();
+      if (dest) el.shopInput.value = dest;
+    } catch (e){
+      console.warn('[SEOBoss] Could not derive shop from JWT', e);
+    }
+  })();
+
+  // ============= 5) Try to fetch existing server-side state =============
+  (async function bootstrap(){
+    const existing = store.read();
+    if (existing?.id) {
+      paintClientId(existing.id);
+      el.savedBadge.style.display = 'flex';
+      el.savedSummary.textContent = `${existing.id} · ${existing.shop_url || '—'} · ${existing.language || 'en'}`;
+      statusDot.style.background = 'var(--mint)';
+      el.statusText.textContent = 'Connected';
+      if (existing.language) el.defaultLanguage.value = existing.language;
+      if (existing.tone) el.tone.value = existing.tone;
+      if (existing.niche) el.niche.value = existing.niche;
+      if (existing.seed_keywords) el.seedKeywords.value = existing.seed_keywords;
+      if (existing.target_audience) el.targetAudience.value = existing.target_audience;
+      if (existing.sheet_url) { el.openSheetBtn.href = existing.sheet_url; el.engineCard.style.display='block'; }
+      el.interlinkingCard.style.display='block';
+      showInstallCardIfReady();
+    }
+
+    // Optionally fetch blogs immediately
+    try {
+      const r = await shopifyAuthorizedFetch('/api/shop/blogs');
+      if (r.ok) {
+        const d = await r.json();
+        if (Array.isArray(d.blogs) && d.blogs.length){
+          el.blogSelect.innerHTML = '';
+          d.blogs.forEach(b=>{
+            const opt=document.createElement('option');
+            opt.value=String(b.id);
+            opt.textContent=b.title || b.handle || ('Blog '+b.id);
+            el.blogSelect.appendChild(opt);
+          });
+          if (d.default_blog_id) el.blogSelect.value = String(d.default_blog_id);
+          el.blogRow.style.display='block';
+        }
+        if (d.client_id) { paintClientId(d.client_id); store.save({ ...(store.read()||{}), id:d.client_id, shop_url:d.shop || el.shopInput.value }); }
       }
-      
-      const pageUrl = data.page_url || `https://${client.shop_url}/pages/seoboss-console`;
-      el.installMsg.innerHTML = `✅ Installed! <a href="${pageUrl}" target="_blank" rel="noopener">Open page</a>`;
-      if (el.openConsoleBtn) el.openConsoleBtn.href = pageUrl;
-      
-    } catch (err) {
-      el.installMsg.textContent = '❌ ' + (err.message || 'Install failed');
-    } finally {
-      setBusy(el.installThemeBtn, false, '⚙️ Add to Theme');
-    }
+    } catch {}
+  })();
+
+  // ============= 6) Events =============
+  // Copy snippet
+  el.copySnippetBtn?.addEventListener('click', async ()=>{
+    try { await navigator.clipboard.writeText(el.embedSnippet.value || ''); el.copySnippetBtn.textContent='✓ Copied!'; }
+    catch { el.embedSnippet.select(); document.execCommand('copy'); el.copySnippetBtn.textContent='✓ Copied!'; }
+    setTimeout(()=> el.copySnippetBtn.textContent='📋 Copy snippet', 1500);
   });
-  
-  // Import articles button
-  el.importArticlesBtn?.addEventListener('click', async () => {
+
+  // Install to theme (server-side)
+  el.installThemeBtn?.addEventListener('click', async ()=>{
     const client = store.read();
-    console.log('[SEOBoss] Import clicked, client data:', client);
-    
-    if (!client || !client.id) {
-      console.warn('[SEOBoss] Import blocked - no client ID found');
-      el.importMsg.textContent = 'Please connect your store first';
-      el.importMsg.style.color = '#ff9b9b';
-      return;
-    }
-    
-    console.log('[SEOBoss] Starting import for client:', client.id);
-    setBusy(el.importArticlesBtn, true, 'Fetching...');
-    el.importMsg.textContent = 'Importing your blog posts...';
-    el.importMsg.style.color = '';
-    
-    try {
-      // This would call your import endpoint
-      // For now, just show a placeholder
-      setTimeout(() => {
-        el.importMsg.textContent = '✅ Posts imported successfully';
-        el.importPreview.innerHTML = '<small>Your posts are now available in your workspace</small>';
-        setBusy(el.importArticlesBtn, false, 'Fetch existing posts');
-      }, 1500);
-      
-    } catch (err) {
-      el.importMsg.textContent = '❌ ' + (err.message || 'Import failed');
-      setBusy(el.importArticlesBtn, false, 'Fetch existing posts');
+    if (!client?.id || !client?.shop_url){ el.installMsg.textContent='No client data found'; return; }
+    setBusy(el.installThemeBtn,true,'Installing…'); el.installMsg.textContent='Adding to your theme…';
+    try{
+      const resp = await shopifyAuthorizedFetch('/api/engine/install', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ client_id: client.id, shop: client.shop_url })
+      });
+      const data = await resp.json();
+      if (!resp.ok || data.ok === false) throw new Error(data?.message || 'Install failed');
+      const pageUrl = data.page_url || `https://${client.shop_url}/pages/seoboss-console`;
+      el.installMsg.innerHTML = `✅ Installed. <a href="${pageUrl}" target="_blank" rel="noopener">Open page</a>`;
+      el.openConsoleBtn.href = pageUrl;
+    }catch(e){
+      el.installMsg.textContent = '❌ ' + (e.message || 'Install failed');
+    }finally{
+      setBusy(el.installThemeBtn,false,'⚙️ Add to Theme');
     }
   });
-  
-  // ============================================
-  // 8. MAIN FORM SUBMISSION
-  // ============================================
-  $('bossForm')?.addEventListener('submit', async (e) => {
+
+  // Import existing posts (server-side)
+  el.importArticlesBtn?.addEventListener('click', async ()=>{
+    const client = store.read();
+    if (!client?.id){ el.importMsg.textContent='Please connect your store first'; el.importMsg.style.color='#ff9b9b'; return; }
+    setBusy(el.importArticlesBtn,true,'Fetching…'); el.importMsg.textContent='Importing your blog posts…'; el.importMsg.style.color='';
+    try{
+      const resp = await shopifyAuthorizedFetch('/api/shop/import-articles', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify({ client_id: client.id })
+      });
+      const d = await resp.json();
+      if (!resp.ok || d.ok === false) throw new Error(d?.message || 'Import failed');
+      el.importMsg.innerHTML = `✅ Imported ${d.imported ?? '—'} posts ${d.deduped ? `(deduped ${d.deduped})` : ''} ${d.sheet_url ? `· <a href="${d.sheet_url}" target="_blank" rel="noopener">Open sheet</a>` : ''}`;
+      if (Array.isArray(d.sample) && d.sample.length){
+        const ul = document.createElement('ul');
+        d.sample.slice(0,10).forEach(p=>{
+          const li=document.createElement('li');
+          const when=p.updated_at? new Date(p.updated_at).toLocaleString() : '';
+          li.innerHTML=`<a href="${p.url}" target="_blank" rel="noopener">${p.title || p.url}</a> <small style="opacity:.7">— ${when}</small>`;
+          ul.appendChild(li);
+        });
+        el.importPreview.innerHTML=''; el.importPreview.appendChild(ul);
+      }
+      if (d.sheet_url){ el.openSheetBtn.href=d.sheet_url; el.engineCard.style.display='block'; }
+      showInstallCardIfReady();
+    }catch(e){
+      el.importMsg.textContent = '❌ ' + (e.message || 'Import failed');
+    }finally{
+      setBusy(el.importArticlesBtn,false,'Fetch existing posts');
+    }
+  });
+
+  // Connect / Save preferences (server-side; onboarding already happened in OAuth callback)
+  $('bossForm')?.addEventListener('submit', async (e)=>{
     e.preventDefault();
-    
-    const container = document.querySelector('#seoboss-onboarding');
-    const submitURL = container.dataset.onboardSubmit;
-    const updateURL = container.dataset.updateProfile;
-    
-    // Collect form data
+    const shopInput = (el.shopInput.value || '').trim().toLowerCase();
     const contactEmail = (el.contactEmail.value || '').trim();
     const defaultLanguage = (el.defaultLanguage.value || 'en').trim().toLowerCase();
-    const shopInput = (el.shopInput.value || '').trim().toLowerCase();
-    const adminToken = (el.adminToken?.value || '').trim();
     const tone = (el.tone.value || '').trim();
     const niche = (el.niche.value || '').trim();
     const seedKeywords = (el.seedKeywords.value || '').trim();
     const targetAudience = (el.targetAudience.value || '').trim();
     const defaultBlogId = (el.blogSelect?.value || '').trim();
-    
-    // Basic validation
-    if (!shopInput || !contactEmail) {
-      el.result.style.display = 'block';
-      el.result.innerHTML = '<span style="color:#ff9b9b">Please fill in required fields</span>';
+
+    if (!shopInput || !contactEmail){
+      el.result.style.display='block';
+      el.result.innerHTML='<span style="color:#ff9b9b">Please fill in required fields</span>';
       return;
     }
-    
-    const existingClient = store.read();
-    const isUpdate = existingClient && existingClient.id;
-    
-    // Prepare payload - MATCH OLD LIQUID FILE FORMAT FOR N8N!
-    // Note: In embedded apps, Shopify provides admin_token via OAuth
-    // Backend derives client_id from shop_input (e.g. "seoboss-engine.myshopify.com" -> "cli_seoboss-engine")
+
+    const existing = store.read();
     const payload = {
-      client_name: '',  // n8n expects this
+      client_id: existing?.id || '',
+      shop: shopInput,
       contact_email: contactEmail,
       default_language: defaultLanguage,
-      shop_input: shopInput,  // n8n uses this to derive client_id!
-      admin_token: adminToken || '',  // Optional in embedded mode - Shopify provides via OAuth
-      tone: tone,
-      niche: niche,
+      tone, niche,
       seed_keywords: seedKeywords,
       target_audience: targetAudience,
-      ...(defaultBlogId ? { default_blog_id: defaultBlogId } : {}),
-      ...(isUpdate && existingClient?.id ? { client_id: existingClient.id } : {}),
-      idem: crypto.randomUUID ? crypto.randomUUID() : String(Date.now())
+      default_blog_id: defaultBlogId || undefined,
+      idem: (crypto.randomUUID?.() || String(Date.now()))
     };
-    
-    console.log('[SEOBoss] Prepared payload for n8n:', payload);
-    console.log('[SEOBoss] shop_input:', payload.shop_input, '(backend will derive client_id from this)');
-    
-    const endpoint = isUpdate ? updateURL : submitURL;
-    if (!endpoint) {
-      el.result.style.display = 'block';
-      el.result.innerHTML = '<span style="color:#ff9b9b">API endpoint not configured</span>';
-      return;
-    }
-    
-    setBusy(el.onboardBtn, true, isUpdate ? 'Saving...' : 'Connecting...');
-    el.result.style.display = 'block';
-    el.result.textContent = isUpdate ? 'Saving preferences...' : 'Setting up your workspace...';
-    
-    try {
-      // Create canonical form body for HMAC
-      const body = canonicalForm(payload);
-      const timestamp = Math.floor(Date.now() / 1000).toString();
-      const hmac = await hmacHex(HMAC_KEY, body + '\n' + timestamp);
-      
-      // Send the same canonical form body that was signed
-      const response = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          'Accept': 'application/json',
-          'X-SEOBOSS-FORWARD-SECRET': FORWARD_SECRET,
-          'X-Seoboss-Ts': timestamp,
-          'X-Seoboss-Hmac': hmac,
-          'X-Seoboss-Key-Id': 'global'
-        },
-        body: body  // Send the canonical form string directly
+
+    setBusy(el.onboardBtn,true, existing?.id ? 'Saving…' : 'Connecting…');
+    el.result.style.display='block';
+    el.result.textContent = existing?.id ? 'Saving preferences…' : 'Setting up your workspace…';
+
+    try{
+      const resp = await shopifyAuthorizedFetch('/api/client/profile', {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json' },
+        body: JSON.stringify(payload)
       });
-      
-      const data = await readJSON(response);
-      
-      // Debug: Log the full response to see what fields we're getting
-      console.log('[SEOBoss] Backend response:', data);
-      
-      if (!response.ok || data.ok === false) {
-        throw new Error(data?.message || data?.raw || response.statusText || 'Request failed');
-      }
-      
-      // Extract client ID - try different possible field names or derive from shop
-      const clientId = data.client_id || data.clientId || data.id || existingClient?.id || '';
-      
-      // If backend didn't return client_id, it might expect us to derive it from shop
-      // Pattern: "seoboss-engine.myshopify.com" -> "cli_seoboss-engine"
-      const derivedClientId = clientId || (shopInput ? `cli_${shopInput.split('.')[0]}` : '');
-      
-      console.log('[SEOBoss] Extracted client ID:', clientId);
-      console.log('[SEOBoss] Derived client ID from shop:', derivedClientId);
-      
-      // Save client profile - use derived ID if backend didn't provide one
+      const data = await resp.json();
+      if (!resp.ok || data.ok === false) throw new Error(data?.message || 'Request failed');
+
+      const clientId = data.client_id || existing?.id || '';
       const profile = {
-        id: derivedClientId,
-        shop_url: data.shop_url || data.shop || shopInput,
+        id: clientId || (shopInput ? `cli_${shopInput.split('.')[0]}` : ''),
+        shop_url: data.shop || data.shop_url || shopInput,
         default_blog_id: data.default_blog_id || defaultBlogId || '',
         language: defaultLanguage,
         tone, niche, seed_keywords: seedKeywords, target_audience: targetAudience,
         ...(data.sheet_url ? { sheet_url: data.sheet_url } : {})
       };
-      
-      console.log('[SEOBoss] Saving profile to localStorage:', profile);
-      
       store.save(profile);
-      if (profile.id) {
-        paintClientId(profile.id);
-      } else {
-        console.warn('[SEOBoss] No client ID to display!');
-      }
-      
-      // Update UI
-      el.savedBadge.style.display = 'flex';
+      if (profile.id) paintClientId(profile.id);
+
+      el.savedBadge.style.display='flex';
       el.savedSummary.textContent = `${profile.id || 'cli_…'} · ${profile.shop_url} · ${profile.language}`;
-      statusDot.style.background = 'var(--mint)';
-      el.statusText.textContent = 'Connected';
-      
-      // Handle blog list if returned
-      if (Array.isArray(data.blogs_list) && data.blogs_list.length) {
-        el.blogSelect.innerHTML = '';
-        data.blogs_list.forEach(blog => {
-          const opt = document.createElement('option');
-          opt.value = String(blog.id);
-          opt.textContent = blog.title || blog.handle || `Blog ${blog.id}`;
+      statusDot.style.background='var(--mint)'; el.statusText.textContent='Connected';
+
+      if (Array.isArray(data.blogs_list) && data.blogs_list.length){
+        el.blogSelect.innerHTML='';
+        data.blogs_list.forEach(b=>{
+          const opt=document.createElement('option');
+          opt.value=String(b.id);
+          opt.textContent=b.title || b.handle || ('Blog '+b.id);
           el.blogSelect.appendChild(opt);
         });
         if (data.default_blog_id) el.blogSelect.value = String(data.default_blog_id);
-        el.blogRow.style.display = 'block';
-      } else if (profile.id || profile.shop_url) {
-        // Auto-discover blogs if not provided
-        console.log('[SEOBoss] No blogs in response, will auto-discover');
-        // Could call autoFetchBlogs() here if implemented
+        el.blogRow.style.display='block';
       }
-      
-      // Show success message with more details
-      if (isUpdate) {
-        el.result.innerHTML = '<strong>✅ Preferences saved successfully!</strong>';
-      } else {
-        el.result.innerHTML = `
-          <strong>${data.message || '✅ Successfully connected!'}</strong><br>
-          ${profile.id ? `Client ID: <code>${profile.id}</code><br>` : ''}
-          Shop: <code>${profile.shop_url}</code><br>
-          ${data.status ? `Status: <code>${data.status}</code><br>` : ''}
-          ${data.counts?.blogs ? `Blogs: <code>${data.counts.blogs}</code>` : ''}
-        `;
+
+      if (data.sheet_url || profile.sheet_url){
+        el.openSheetBtn.href = data.sheet_url || profile.sheet_url;
+        el.engineCard.style.display='block';
       }
-      
-      // Show workspace link
-      if (data.sheet_url) {
-        el.openSheetBtn.href = data.sheet_url;
-        el.engineCard.style.display = 'block';
-      } else if (profile.sheet_url) {
-        el.openSheetBtn.href = profile.sheet_url;
-        el.engineCard.style.display = 'block';
-      }
-      
-      // Show additional cards
-      el.interlinkingCard.style.display = 'block';
+
+      el.interlinkingCard.style.display='block';
       showInstallCardIfReady();
-      
-    } catch (err) {
-      console.error('[SEOBoss] Submission error:', err);
-      el.result.innerHTML = `<span style="color:#ff9b9b">❌ ${err.message || 'Failed to connect'}</span>`;
-      statusDot.style.background = '#ff8b8b';
-      statusDot.style.boxShadow = '0 0 10px rgba(255,100,100,0.9)';
-    } finally {
-      setBusy(el.onboardBtn, false, '🔌 Connect');
+
+      el.result.innerHTML = existing?.id
+        ? '<strong>✅ Preferences saved successfully!</strong>'
+        : `<strong>${data.message || '✅ Successfully connected!'}</strong><br>
+           ${profile.id ? `Client ID: <code>${profile.id}</code><br>` : ''}
+           Shop: <code>${profile.shop_url}</code><br>
+           ${data.status ? `Status: <code>${data.status}</code><br>` : ''}`;
+
+    }catch(e){
+      el.result.innerHTML = `<span style="color:#ff9b9b">❌ ${e.message || 'Failed to connect'}</span>`;
+      statusDot.style.background='#ff8b8b'; statusDot.style.boxShadow='0 0 10px rgba(255,100,100,.9)';
+    }finally{
+      setBusy(el.onboardBtn,false,'🔌 Connect');
     }
   });
-  
-  // Check for existing client on page load
-  (function checkExistingClient() {
-    const client = store.read();
-    console.log('[SEOBoss] Page load - checking for existing client:', client);
-    
-    if (client && client.id) {
-      console.log('[SEOBoss] Found existing client, updating UI');
-      paintClientId(client.id);
-      el.savedBadge.style.display = 'flex';
-      el.savedSummary.textContent = `${client.id} · ${client.shop_url || '—'} · ${client.language || 'en'}`;
-      statusDot.style.background = 'var(--mint)';
-      el.statusText.textContent = 'Connected';
-      
-      // Prefill form fields
-      if (client.shop_url) el.shopInput.value = client.shop_url;
-      if (client.language) el.defaultLanguage.value = client.language;
-      if (client.tone) el.tone.value = client.tone;
-      if (client.niche) el.niche.value = client.niche;
-      if (client.seed_keywords) el.seedKeywords.value = client.seed_keywords;
-      if (client.target_audience) el.targetAudience.value = client.target_audience;
-      
-      // Show appropriate cards
-      el.interlinkingCard.style.display = 'block';
-      showInstallCardIfReady();
-      
-      if (client.sheet_url) {
-        el.openSheetBtn.href = client.sheet_url;
-        el.engineCard.style.display = 'block';
-      }
-    } else {
-      console.log('[SEOBoss] No existing client found');
-    }
-  })();
-  
-  console.log('[SEOBoss] Onboarding page ready');
-  
+
+  console.log('[SEOBoss] Embedded page ready');
 })();
 </script>
 
