@@ -364,7 +364,12 @@
   let app, appReady = false;
   
   try {
-    app = window.createApp({
+    // Check if App Bridge loaded
+    if (typeof createApp === 'undefined') {
+      throw new Error('App Bridge createApp not found');
+    }
+    
+    app = createApp({
       apiKey: API_KEY,
       host: host,
     });
@@ -375,7 +380,6 @@
     document.getElementById('statusText').textContent = 'Failed to initialize';
     return;
   }
-
   // Check if we have a valid session
   (async function checkAuth() {
     try {
