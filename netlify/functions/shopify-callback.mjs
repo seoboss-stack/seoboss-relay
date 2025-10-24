@@ -229,6 +229,14 @@ try {
   admin_token: accessToken   // <-- only if you really want to send it
 };
 
+    // inside your Netlify shopify-callback
+const adminPage = `https://hooks.seoboss.com/admin/index.html?installed=1&shop=${encodeURIComponent(shop)}`;
+return {
+  statusCode: 302,
+  headers: { Location: adminPage },
+  body: ""
+};
+
 
     // optional HMAC of body for extra integrity
     let hmac = "";
