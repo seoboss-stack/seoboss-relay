@@ -163,6 +163,13 @@
           <small id="installMsg" class="msg"></small>
         </div>
 
+        <!-- Disconnect / Uninstall -->
+        <div class="actions" style="margin-top:.8rem">
+          <button id="disconnectBtn" class="btn">🔒 Disconnect</button>
+          <button id="uninstallBtn" class="btn outline">🗑 Uninstall</button>
+        </div>
+        <small id="disconnectMsg" class="msg"></small>
+
       </div>
     </div>
   </div>
@@ -171,6 +178,9 @@
 <script>
 (function(){
   'use strict';
+
+  // ============= 0) Constants =============
+  const API_BASE = '/.netlify/functions/relay/seoboss/api'; // relay base
 
   // ============= 1) App Bridge =============
   const qs = new URLSearchParams(location.search);
@@ -198,10 +208,28 @@
     }
   } catch {}
 
+  // --- Shop-scoped storage ---
+  async function getActiveShop(app){
+    const token = await AppBridgeUtils.getSessionToken(app);
+    const payload = JSON.parse(atob(token.split('.')[1].replace(/-/g,'+').replace(/_/g,'/')));
+    return String((payload.dest||'').replace(/^https?:\/\//,'')).toLowerCase();
+  }
+  function storeFor(shop){
+    const key = `seoboss_client:${shop}`;
+    return {
+      read(){ try{ return JSON.parse(localStorage.getItem(key) || 'null'); }catch{ return null; } },
+      save(v){ try{ localStorage.setItem(key, JSON.stringify(v)); }catch{} },
+      clear(){ try{ localStorage.removeItem(key); }catch{} }
+    };
+  }
+  let scopedStore = null;
+  function getStore(){ return scopedStore || { read:()=>null, save:()=>{}, clear:()=>{} }; }
+
   // ============= 2) Authenticated fetch (backend owns secrets) =============
   async function shopifyAuthorizedFetch(path, init = {}) {
     const token = await getSessionToken();
-    return fetch(path, {
+    const url = path.startsWith('/') ? path : `/${path}`;
+    return fetch(url, {
       ...init,
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -243,20 +271,17 @@
     copySnippetBtn: $('copySnippetBtn'),
     openConsoleBtn: $('openConsoleBtn'),
     embedSnippet: $('embedSnippet'),
-    installMsg: $('installMsg')
+    installMsg: $('installMsg'),
+    disconnectBtn: $('disconnectBtn'),
+    uninstallBtn: $('uninstallBtn'),
+    disconnectMsg: $('disconnectMsg')
   };
   const statusDot = document.querySelector('.dot');
-
-  const store = {
-    key: 'seoboss_client',
-    read(){ try{ return JSON.parse(localStorage.getItem(this.key) || 'null'); }catch{ return null; } },
-    save(d){ try{ localStorage.setItem(this.key, JSON.stringify(d)); }catch{} }
-  };
 
   function setBusy(btn, busy, text){ if(!btn) return; btn.disabled = !!busy; if(text) btn.textContent = text; }
   function paintClientId(id){ if(!id) return; el.clientIdDisplay.textContent = id; el.clientIdBadge.style.display='block'; el.clientIdHidden.value=id; }
   function showInstallCardIfReady(){
-    const client = store.read(); if(!client?.id || !client?.shop_url) return;
+    const client = getStore().read(); if(!client?.id || !client?.shop_url) return;
     el.installCard.style.display='block';
     el.embedSnippet.value =
 `<div id="seoboss-console"
@@ -267,23 +292,34 @@
     el.openConsoleBtn.href = consoleUrl;
   }
 
-  // ============= 4) Derive shop from URL or JWT =============
+  // ============= 4) Derive shop & scope storage =============
   (async function deriveShop(){
     const shopFromUrl = (qs.get('shop') || '').toLowerCase();
-    if (shopFromUrl) { el.shopInput.value = shopFromUrl; return; }
     try {
-      const jwt = await getSessionToken();
-      const payload = JSON.parse(atob((jwt.split('.')[1]||'').replace(/-/g,'+').replace(/_/g,'/')));
-      const dest = (payload.dest || '').replace(/^https?:\/\//,'').toLowerCase();
-      if (dest) el.shopInput.value = dest;
+      const activeShop = shopFromUrl || await getActiveShop(app);
+      if (activeShop) {
+        el.shopInput.value = activeShop;
+        scopedStore = storeFor(activeShop);
+
+        // optional: migrate old global store if it matches this shop
+        const legacy = (()=>{ try{ return JSON.parse(localStorage.getItem('seoboss_client')||'null'); }catch{ return null; } })();
+        if (!getStore().read() && legacy && String(legacy.shop_url||'').toLowerCase() === activeShop) {
+          getStore().save(legacy);
+        }
+        const prof = getStore().read();
+        if (prof && String(prof.shop_url||'').toLowerCase() !== activeShop) {
+          getStore().clear();
+        }
+      }
     } catch (e){
       console.warn('[SEOBoss] Could not derive shop from JWT', e);
     }
   })();
 
-  // ============= 5) Try to fetch existing server-side state =============
+  // ============= 5) Try to fetch existing server-side state + blogs =============
   (async function bootstrap(){
-    const existing = store.read();
+    // paint any saved profile
+    const existing = getStore().read();
     if (existing?.id) {
       paintClientId(existing.id);
       el.savedBadge.style.display = 'flex';
@@ -300,9 +336,9 @@
       showInstallCardIfReady();
     }
 
-    // Optionally fetch blogs immediately
+    // fetch blogs via relay (embedded)
     try {
-      const r = await shopifyAuthorizedFetch('/api/shop/blogs');
+      const r = await shopifyAuthorizedFetch(`${API_BASE}/shop/blogs`);
       if (r.ok) {
         const d = await r.json();
         if (Array.isArray(d.blogs) && d.blogs.length){
@@ -316,7 +352,11 @@
           if (d.default_blog_id) el.blogSelect.value = String(d.default_blog_id);
           el.blogRow.style.display='block';
         }
-        if (d.client_id) { paintClientId(d.client_id); store.save({ ...(store.read()||{}), id:d.client_id, shop_url:d.shop || el.shopInput.value }); }
+        if (d.client_id) {
+          paintClientId(d.client_id);
+          const cur = getStore().read() || {};
+          getStore().save({ ...cur, id:d.client_id, shop_url:d.shop || el.shopInput.value });
+        }
       }
     } catch {}
   })();
@@ -331,11 +371,11 @@
 
   // Install to theme (server-side)
   el.installThemeBtn?.addEventListener('click', async ()=>{
-    const client = store.read();
+    const client = getStore().read();
     if (!client?.id || !client?.shop_url){ el.installMsg.textContent='No client data found'; return; }
     setBusy(el.installThemeBtn,true,'Installing…'); el.installMsg.textContent='Adding to your theme…';
     try{
-      const resp = await shopifyAuthorizedFetch('/api/engine/install', {
+      const resp = await shopifyAuthorizedFetch(`${API_BASE}/engine/install`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ client_id: client.id, shop: client.shop_url })
@@ -354,11 +394,11 @@
 
   // Import existing posts (server-side)
   el.importArticlesBtn?.addEventListener('click', async ()=>{
-    const client = store.read();
+    const client = getStore().read();
     if (!client?.id){ el.importMsg.textContent='Please connect your store first'; el.importMsg.style.color='#ff9b9b'; return; }
     setBusy(el.importArticlesBtn,true,'Fetching…'); el.importMsg.textContent='Importing your blog posts…'; el.importMsg.style.color='';
     try{
-      const resp = await shopifyAuthorizedFetch('/api/shop/import-articles', {
+      const resp = await shopifyAuthorizedFetch(`${API_BASE}/shop/import-articles`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify({ client_id: client.id })
@@ -403,7 +443,7 @@
       return;
     }
 
-    const existing = store.read();
+    const existing = getStore().read();
     const payload = {
       client_id: existing?.id || '',
       shop: shopInput,
@@ -421,7 +461,7 @@
     el.result.textContent = existing?.id ? 'Saving preferences…' : 'Setting up your workspace…';
 
     try{
-      const resp = await shopifyAuthorizedFetch('/api/client/profile', {
+      const resp = await shopifyAuthorizedFetch(`${API_BASE}/client/profile`, {
         method:'POST',
         headers:{ 'Content-Type':'application/json' },
         body: JSON.stringify(payload)
@@ -438,7 +478,7 @@
         tone, niche, seed_keywords: seedKeywords, target_audience: targetAudience,
         ...(data.sheet_url ? { sheet_url: data.sheet_url } : {})
       };
-      store.save(profile);
+      getStore().save(profile);
       if (profile.id) paintClientId(profile.id);
 
       el.savedBadge.style.display='flex';
@@ -478,6 +518,35 @@
     }finally{
       setBusy(el.onboardBtn,false,'🔌 Connect');
     }
+  });
+
+  // Disconnect (deactivate on server + clear local)
+  el.disconnectBtn?.addEventListener('click', async () => {
+    try{
+      if (!app) throw new Error('App Bridge not ready');
+      const activeShop = await getActiveShop(app);
+      const token = await AppBridgeUtils.getSessionToken(app);
+      const resp = await fetch(`${API_BASE}/client/profile`, {
+        method:'POST',
+        headers:{ 'Content-Type':'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ op:'deactivate_shop', shop: activeShop })
+      });
+      const d = await resp.json().catch(()=>({}));
+      if (!resp.ok || d.ok === false) throw new Error(d?.message || 'Failed to disconnect');
+      storeFor(activeShop).clear();
+      el.disconnectMsg.textContent = '✅ Disconnected. You can now uninstall from Shopify → Settings → Apps.';
+    }catch(e){
+      el.disconnectMsg.textContent = '❌ ' + (e.message || 'Disconnect failed');
+    }
+  });
+
+  // Uninstall (navigate to apps settings)
+  el.uninstallBtn?.addEventListener('click', () => {
+    try{
+      const Redirect = window.appBridge?.actions?.Redirect;
+      if (app && Redirect) Redirect.create(app).dispatch(Redirect.Action.ADMIN_PATH, '/settings/apps');
+      else window.top.location.href = 'https://admin.shopify.com/store/-/settings/apps';
+    }catch(e){ console.error('Uninstall redirect failed', e); }
   });
 
   console.log('[SEOBoss] Embedded page ready');
