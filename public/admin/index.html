@@ -7,37 +7,29 @@
 
   <!-- App Bridge (optional but recommended for embedded Admin) -->
   <script type="module">
-    // Resolve config values from (1) hardcoded, (2) window vars, (3) query params
-    const qs = new URLSearchParams(location.search);
-    const HARD_API_KEY = '5654f5c575452aefdca2592d2a2d1f3d';        // <<< PUT YOUR VALUES HERE
-    const HARD_HMAC    = 'SEOBOSSSECRET_2025';     // <<< PUT YOUR VALUES HERE
+  import createApp from 'https://cdn.jsdelivr.net/npm/@shopify/app-bridge@3.7.10/esm/index.js';
 
-    const apiKey =
-      HARD_API_KEY !== 'REPLACE_WITH_YOUR_APP_API_KEY' ? HARD_API_KEY :
-      (window.__SEOBOSS_APP_API_KEY || qs.get('apiKey') || '');
+  // Read host & shop from Shopify’s embedded URL
+  const qs   = new URLSearchParams(location.search);
+  const host = qs.get('host') || '';
+  const shop = (qs.get('shop') || '').toLowerCase();
 
-    const publicHmacKey =
-      HARD_HMAC !== 'REPLACE_WITH_PUBLIC_HMAC_KEY_2025' ? HARD_HMAC :
-      (window.__SEOBOSS_PUBLIC_HMAC_KEY || qs.get('hmacKey') || '');
+  // If you need your app’s API key in the client, set it in your Liquid or inject it from Netlify env at build
+  const apiKey = '5654f5c575452aefdca2592d2a2d1f3d' || '';  // replace with your way of injecting the key
 
-    // Expose for the main script
-    window.__SEOBOSS_BOOT = { apiKey, publicHmacKey };
-
-    // If we have a host param, we’re inside Admin. Load App Bridge helpers.
-    if (qs.get('host')) {
-      const appBridge = await import('https://unpkg.com/@shopify/app-bridge@3/dist/shopify_app_bridge.es.js');
-      const utils     = await import('https://unpkg.com/@shopify/app-bridge-utils@3/dist/shopify_app_bridge_utils.es.js');
-
-      const app = appBridge.createApp({
-        apiKey: apiKey || 'missing_api_key',
-        host: qs.get('host'),
-        forceRedirect: true
-      });
-
-      // Expose getSessionToken for backend calls if you need it later
-      window.__SEOBOSS_getSessionToken = () => utils.getSessionToken(app);
+  let app = null;
+  try {
+    if (host && apiKey) {
+      app = createApp({ apiKey, host }); // App Bridge is ready
     }
-  </script>
+  } catch (e) {
+    console.warn('[SEOBoss] App Bridge failed to init (continuing anyway):', e);
+  }
+
+  // Expose shop to your onboarding script/UI even if App Bridge fails
+  window.__SEOBOSS__ = window.__SEOBOSS__ || {};
+  window.__SEOBOSS__.shop = shop;
+</script>
 
   <style>
     /* Minimal styles; keep your existing look & feel */
