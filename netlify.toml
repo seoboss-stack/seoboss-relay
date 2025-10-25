@@ -37,16 +37,6 @@ to   = "/.netlify/functions/result"
 status = 200
 force = true
 
-# --- Admin page (embedded UI) ---
-[[redirects]]
-  from = "/admin"
-  to = "/admin/"
-  status = 301
-
-[[redirects]]
-  from = "/admin/*"
-  to = "/admin/index.html"
-  status = 200
 
 # --- Optional: specific function routes (before catch-all) ---
 # If you add a standalone whoami function:
@@ -56,15 +46,13 @@ force = true
   status = 200
 
 
-
-
 # Catch-all relay for SEOBoss API
 [[redirects]]
   from = "/seoboss/api/*"
   to = "/.netlify/functions/relay/seoboss/api/:splat"
   status = 200
   force = true
-
+  
 # Vault endpoints (App Proxy → Functions)
 [[redirects]]
   from = "/apps/engine/v3/vault/list"
@@ -91,6 +79,13 @@ force = true
   status = 200
   force = true
 
+
+# App Proxy → Engine Proxy function
+[[redirects]]
+  from = "/proxy/*"
+  to = "/.netlify/functions/engine-proxy/:splat"
+  status = 200
+  force = true
 
 
   # Vault endpoints that Shopify App Proxy actually forwards to your site
@@ -132,10 +127,14 @@ force = true
   status = 200
   force = true
 
-  # App Proxy → Engine Proxy function
+  # --- Admin page (embedded UI) ---
 [[redirects]]
-  from = "/proxy/*"
-  to = "/.netlify/functions/engine-proxy/:splat"
+  from = "/admin"
+  to = "/admin/"
+  status = 301
+
+[[redirects]]
+  from = "/admin/*"
+  to = "/admin/index.html"
   status = 200
-  force = true
 
