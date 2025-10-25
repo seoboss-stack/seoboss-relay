@@ -2,20 +2,26 @@
 import crypto from "node:crypto";
 
 /**
- * ENV you must set in Netlify:
- * - SHOPIFY_API_KEY
- * - SHOPIFY_API_SECRET
- * - SUPABASE_URL
- * - SUPABASE_SERVICE_KEY
- * - N8N_TOKEN_KEY_BASE64           (32-byte key, base64-encoded)
- * - FORWARD_SECRET                 (shared with n8n)
- * - N8N_ENGINE_BASE_URL            (e.g. https://blogengine.ngrok.app/webhook/seoboss)
- * - CALLBACK_REDIRECT (optional)   (where to send the merchant after success; defaults to a small "you can close this" page)
- * - SKIP_STATE_CHECK=true (optional for local dev)
+ * Required ENV:
+ * - SHOPIFY_API_KEY            (or SHOPIFY_API_KEY_PUBLIC)
+ * - SHOPIFY_APP_SECRET         (or SHOPIFY_APP_SECRET_PUBLIC)
+ * - FORWARD_SECRET             (shared secret for your backend/n8n)
+ * - APP_URL or PUBLIC_BASE_URL (e.g. https://hooks.seoboss.com)
+ *
+ * Optional ENV:
+ * - N8N_ONBOARD_SUBMIT_URL     (POST target to begin onboarding)
+ * - PUBLIC_HMAC_KEY            (if you want to HMAC-sign n8n body)
  */
 
-// ---- helpers ---------------------------------------------------------------
+const getEnv = (k, alt) => process.env[k] || (alt ? process.env[alt] : "") || "";
+const APP_BASE = (getEnv("PUBLIC_BASE_URL") || getEnv("APP_URL") || "https://hooks.seoboss.com").replace(/\/$/, "");
+const API_KEY = getEnv("SHOPIFY_API_KEY", "SHOPIFY_API_KEY_PUBLIC");
+const SECRET  = getEnv("SHOPIFY_APP_SECRET", "SHOPIFY_APP_SECRET_PUBLIC");
+const N8N_URL = getEnv("N8N_ONBOARD_SUBMIT_URL");
+const FWD_SECRET = getEnv("FORWARD_SECRET") || "";
+const PUBLIC_HMAC_KEY = getEnv("PUBLIC_HMAC_KEY") || "";
 
+// ---------- helpers ----------
 const normShop = (s = "") =>
   String(s)
     .trim()
@@ -26,35 +32,81 @@ const normShop = (s = "") =>
     .replace(/:\d+$/, "")
     .replace(/\.shopify\.com$/i, ".myshopify.com");
 
-function isValidShop(myshop) {
-  return /^[a-z0-9][a-z0-9\-]*\.myshopify\.com$/i.test(myshop);
+function parseCookies(header = "") {
+  return Object.fromEntries(
+    (header || "")
+      .split(/; */)
+      .filter(Boolean)
+      .map((c) => {
+        const i = c.indexOf("=");
+        if (i === -1) return [c, ""];
+        return [c.slice(0, i).trim(), decodeURIComponent(c.slice(1 + i))];
+      })
+  );
 }
 
-// RFC3986 encoder Shopify expects when building the message for HMAC check
-const encodeRFC3986 = (str) =>
-  encodeURIComponent(str).replace(/[!'()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`);
+async function registerWebhooks({ shop, access_token, baseUrl }) {
+  const apiBase = `https://${shop}/admin/api/2024-10`;
+  const headers = {
+    "Content-Type": "application/json",
+    "X-Shopify-Access-Token": access_token,
+  };
 
-function buildHmacMessage(url) {
-  // Copy all params except hmac & signature; sort by key; join "k=v" with "&"
-  const qp = new URLSearchParams(url.search);
-  qp.delete("hmac");
-  qp.delete("signature");
+  // Add more topics later if needed
+  const targets = [
+    { topic: "app/uninstalled", address: `${baseUrl}/.netlify/functions/uninstalled` },
+  ];
 
-  const entries = Array.from(qp.entries())
-    .map(([k, v]) => [k, v])
-    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-    .map(([k, v]) => `${encodeRFC3986(k)}=${encodeRFC3986(v)}`);
+  const listRes = await fetch(`${apiBase}/webhooks.json`, { headers });
+  if (!listRes.ok) throw new Error(`list webhooks: ${listRes.status} ${await listRes.text()}`);
+  const existing = (await listRes.json())?.webhooks || [];
 
-  return entries.join("&");
+  for (const { topic, address } of targets) {
+    const already = existing.some((w) => w.topic === topic && w.address === address);
+    if (already) continue;
+    const create = await fetch(`${apiBase}/webhooks.json`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ webhook: { topic, address, format: "json" } }),
+    });
+    if (!create.ok) throw new Error(`create ${topic}: ${create.status} ${await create.text()}`);
+  }
 }
 
-function timingSafeEq(a, b) {
+async function storeTokenVault({ shop, access_token }) {
+  const url = `${APP_BASE}/.netlify/functions/store-shop-token`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-SEOBOSS-FORWARD-SECRET": FWD_SECRET,
+    },
+    body: JSON.stringify({ shop, token: access_token }),
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(`store-shop-token failed: ${res.status} ${txt}`);
+  }
+}
+
+// Fire n8n quickly; do not block redirect
+async function postToN8NFireAndForget({ url, headers, body, timeoutMs = 2500 }) {
+  if (!url) return "";
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const ba = Buffer.from(a, "hex");
-    const bb = Buffer.from(b, "hex");
-    return ba.length === bb.length && crypto.timingSafeEqual(ba, bb);
+    const r = await fetch(url, { method: "POST", headers, body, signal: controller.signal });
+    if (r && r.ok) {
+      try {
+        const data = await r.json().catch(() => ({}));
+        return data?.client_id || data?.clientId || "";
+      } catch {}
+    }
+    return "";
   } catch {
-    return false;
+    return "";
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -66,241 +118,126 @@ function json(status, data) {
   };
 }
 
-function html(status, markup) {
-  return {
-    statusCode: status,
-    headers: { "Content-Type": "text/html; charset=utf-8" },
-    body: markup,
-  };
-}
-
-// ---- main -----------------------------------------------------------------
-
+// ---------- handler ----------
 export const handler = async (event) => {
+  let shop = "";
   try {
-    if (event.httpMethod !== "GET") return json(405, "GET only");
+    if (!API_KEY || !SECRET) return json(500, { error: "missing API key/secret" });
+
     const url = new URL(event.rawUrl);
+    const q = Object.fromEntries(url.searchParams.entries());
+    const { hmac, code, state, timestamp } = q;
+    const host = q.host || ""; // Admin host to keep embedded happy
+    shop = normShop(q.shop || "");
 
-    const shopRaw = url.searchParams.get("shop") || "";
-    const code = url.searchParams.get("code") || "";
-    const state = url.searchParams.get("state") || "";
-    const hmac = (url.searchParams.get("hmac") || "").trim();
-
-    const shop = normShop(shopRaw);
-    if (!isValidShop(shop)) return json(400, { error: "invalid shop domain", shop });
-
-    if (!code || !hmac) return json(400, { error: "missing code or hmac" });
-
-    // (1) Verify state (nonce) against a cookie set during /shopify-install
-    if (!process.env.SKIP_STATE_CHECK) {
-      const cookieHdr = event.headers?.cookie || event.headers?.Cookie || "";
-      const cookies = Object.fromEntries(
-        cookieHdr
-          .split(";")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .map((kv) => {
-            const i = kv.indexOf("=");
-            return [kv.slice(0, i), decodeURIComponent(kv.slice(i + 1))];
-          })
-      );
-      const expectedState = cookies["sb_state"] || "";
-      if (!expectedState || expectedState !== state) {
-        return json(401, { error: "bad state" });
-      }
+    // 1) Validate shop
+    if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(shop)) {
+      return json(400, { error: "invalid shop domain", shop });
     }
 
-    // (2) Verify HMAC from Shopify
-    const message = buildHmacMessage(url);
-    const digest = crypto.createHmac("sha256", process.env.SHOPIFY_API_SECRET).update(message, "utf8").digest("hex");
-    if (!timingSafeEq(digest, hmac)) {
-      return json(401, { error: "bad hmac" });
+    // 2) Validate state only if we previously set the cookie (prevents false 401s)
+    const cookies = parseCookies(event.headers?.cookie || event.headers?.Cookie || "");
+    if (state && cookies.shopify_oauth_state && cookies.shopify_oauth_state !== state) {
+      return json(401, { error: "bad state" });
     }
 
-    // (3) Exchange code -> Admin access token
-    const tokenResp = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    // 3) Anti-replay + HMAC
+    const ts = Number(timestamp || 0);
+    if (!ts || Math.abs(Date.now() / 1000 - ts) > 600) return json(401, { error: "stale oauth" });
+    if (!hmac || !code) return json(400, { error: "missing params" });
+
+    const message = Object.keys(q)
+      .filter((k) => k !== "hmac" && k !== "signature")
+      .sort()
+      .map((k) => `${k}=${q[k]}`)
+      .join("&");
+    const digest = crypto.createHmac("sha256", SECRET).update(message).digest("hex");
+    const safe =
+      hmac.length === digest.length &&
+      crypto.timingSafeEqual(Buffer.from(hmac, "hex"), Buffer.from(digest, "hex"));
+    if (!safe) return json(401, { error: "invalid hmac" });
+
+    // 4) Exchange code → offline access token
+    const tokenRes = await fetch(`https://${shop}/admin/oauth/access_token`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_id: process.env.SHOPIFY_API_KEY,
-        client_secret: process.env.SHOPIFY_API_SECRET,
-        code,
-      }),
+      body: JSON.stringify({ client_id: API_KEY, client_secret: SECRET, code }),
     });
-
-    if (!tokenResp.ok) {
-      const t = await tokenResp.text();
-      return json(tokenResp.status, { error: "token_exchange_failed", text: t });
+    if (!tokenRes.ok) {
+      const errTxt = await tokenRes.text().catch(() => "");
+      return json(502, { error: "token_exchange_failed", text: errTxt });
     }
+    const { access_token } = await tokenRes.json();
+    if (!access_token) return json(502, { error: "no_access_token" });
 
-    const tokenData = await tokenResp.json(); // { access_token, scope, ... }
-    const accessToken = tokenData.access_token;
-    if (!accessToken) return json(500, { error: "no_access_token" });
+    // 5) Store token securely
+    try { await storeTokenVault({ shop, access_token }); } catch {}
 
-    // (4) Encrypt token (AES-256-GCM)
-    const kB64 = process.env.N8N_TOKEN_KEY_BASE64 || "";
-    const key = Buffer.from(kB64, "base64");
-    if (key.length !== 32) return json(500, { error: "bad N8N_TOKEN_KEY_BASE64 length (need 32-byte base64)" });
+    // 6) Register required webhooks
+    try { await registerWebhooks({ shop, access_token, baseUrl: APP_BASE }); } catch {}
 
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv("aes-256-gcm", key, iv);
-    const ct = Buffer.concat([cipher.update(accessToken, "utf8"), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    const packed = Buffer.concat([ct, tag]); // store as ciphertext|tag
-
-    const iv_b64 = iv.toString("base64");
-    const token_b64 = packed.toString("base64");
-
-    // (5) Upsert to Supabase
-    const supaUrl = process.env.SUPABASE_URL;
-    const supaKey = process.env.SUPABASE_SERVICE_KEY;
-    if (!supaUrl || !supaKey) return json(500, { error: "missing supabase env" });
-
-    // Table schema expected by your get-shop-token.mjs:
-    // encrypted_shop_tokens(shop text primary key, token_b64 text, iv_b64 text)
-    const upsertResp = await fetch(`${supaUrl}/rest/v1/encrypted_shop_tokens`, {
-      method: "POST",
-      headers: {
-        apikey: supaKey,
-        Authorization: `Bearer ${supaKey}`,
-        "Content-Type": "application/json",
-        Prefer: "resolution=merge-duplicates",
-      },
-      body: JSON.stringify([{ shop, token_b64, iv_b64 }]),
-    });
-
-    if (!upsertResp.ok) {
-      const t = await upsertResp.text();
-      return json(upsertResp.status, { error: "supabase_upsert_failed", text: t });
-    }
-
-   // (6) Kick onboarding into n8n with rich context (no token sent)
-try {
-  // deterministic client_id from shop
-  const sub  = shop.replace(/\.myshopify\.com$/i, "");
-  const slug = sub.replace(/[^a-z0-9]+/gi, "_").toLowerCase().replace(/^_+|_+$/g, "");
-  const hash = crypto.createHash("sha1").update(shop).digest("hex").slice(0, 6);
-  const client_id = `cli_${slug}_${hash}`;
-
-  // (optional) cache the mapping in Supabase
-  try {
-    const supaUrl = process.env.SUPABASE_URL;
-    const supaKey = process.env.SUPABASE_SERVICE_KEY;
-    if (supaUrl && supaKey) {
-      await fetch(`${supaUrl}/rest/v1/clients`, {
-        method: "POST",
-        headers: {
-          apikey: supaKey,
-          Authorization: `Bearer ${supaKey}`,
-          "Content-Type": "application/json",
-          Prefer: "resolution=merge-duplicates"
-        },
-        body: JSON.stringify([{ client_id, shop }])
-      }).catch(() => {});
-    }
-  } catch {}
-
-  const base = (process.env.N8N_ENGINE_BASE_URL || "").replace(/\/$/, "");
-  if (base) {
-    const site_url = `https://${shop}`;
-
-    // collect optional onboarding fields if you have them available here
-    const contact_email     = (shopInfo?.email) || "";   // e.g., if you fetched shop info
-    const default_language  = "en";
-    const tone              = ""; // fill if captured earlier
-    const target_audience   = "";
-    const niche             = "";
-    const seed_keywords     = "";
-    const shop_input        = "";
-    const plan              = ""; // "starter"|"pro"|"elite" etc.
-
-    const payload = {
-  shop,
-  site_url,
-  client_id,
-  contact_email,
-  default_language,
-  tone,
-  target_audience,
-  niche,
-  seed_keywords,
-  shop_input,
-  plan,
-  admin_token: accessToken   // <-- only if you really want to send it
-};
-
-    // inside your Netlify shopify-callback
-const adminPage = `https://hooks.seoboss.com/admin/index.html?installed=1&shop=${encodeURIComponent(shop)}`;
-return {
-  statusCode: 302,
-  headers: { Location: adminPage },
-  body: ""
-};
-
-
-    // optional HMAC of body for extra integrity
-    let hmac = "";
+    // 7) Kick onboarding in n8n (fire-and-forget, short timeout)
+    let client_id = "";
     try {
-      const keyB64 = process.env.N8N_TOKEN_KEY_BASE64 || "";
-      if (keyB64) {
-        const key = Buffer.from(keyB64, "base64");
-        hmac = crypto.createHmac("sha256", key).update(JSON.stringify(payload), "utf8").digest("hex");
+      if (N8N_URL) {
+        const bodyForm = new URLSearchParams({
+          client_name: "",
+          contact_email: "",
+          default_language: "en",
+          shop_input: shop,
+          admin_token: access_token, // TODO: migrate to vault-fetch on n8n side
+          tone: "",
+          niche: "",
+          seed_keywords: "",
+          target_audience: "",
+        }).toString();
+
+        const ts2 = String(Math.floor(Date.now() / 1000));
+        const headers = {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "X-SEOBOSS-FORWARD-SECRET": FWD_SECRET,
+          "X-Seoboss-Ts": ts2,
+          "X-Seoboss-Key-Id": "global",
+        };
+        if (PUBLIC_HMAC_KEY) {
+          const sig = crypto.createHmac("sha256", PUBLIC_HMAC_KEY).update(bodyForm + "\n" + ts2).digest("hex");
+          headers["X-Seoboss-Hmac"] = sig;
+        }
+        client_id = await postToN8NFireAndForget({
+          url: N8N_URL,
+          headers,
+          body: bodyForm,
+          timeoutMs: 2500,
+        });
       }
     } catch {}
 
-    await fetch(`${base}/api/onboarding/submit`, {
-      method: "POST",
+    // 8) Final redirect → embedded Admin
+    const admin = new URL(`${APP_BASE}/admin`);
+    admin.searchParams.set("shop", shop);
+    if (host) admin.searchParams.set("host", host);
+    admin.searchParams.set("installed", "1");
+    if (client_id) admin.searchParams.set("client_id", client_id);
+
+    return {
+      statusCode: 302,
       headers: {
-        "Content-Type": "application/json",
-        "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
-        "X-Seoboss-Ts": String(Math.floor(Date.now() / 1000)),
-        "X-Seoboss-Key-Id": "global",
-        ...(hmac ? { "X-Seoboss-Hmac": hmac } : {})
+        Location: admin.toString(),
+        "Set-Cookie": "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
       },
-      body: JSON.stringify(payload)
-    }).catch(() => {});
-  }
-} catch {}
-
-
-    // (6) Optional: kick the initial import through n8n
-    try {
-      const base = (process.env.N8N_ENGINE_BASE_URL || "").replace(/\/$/, "");
-      if (base) {
-        await fetch(`${base}/api/shop/import-articles`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "X-SEOBOSS-FORWARD-SECRET": process.env.FORWARD_SECRET || "",
-            "X-Seoboss-Ts": String(Math.floor(Date.now() / 1000)),
-          },
-          body: JSON.stringify({ shop }),
-        }).catch(() => {});
-      }
-    } catch {}
-
-    // (7) Redirect back to your app UI in Admin (or show a friendly "done" page)
-    const redirectTo = process.env.CALLBACK_REDIRECT; // e.g. https://hooks.seoboss.com/admin/index.html?shop=...
-    if (redirectTo) {
-      return {
-        statusCode: 302,
-        headers: { Location: `${redirectTo}${redirectTo.includes("?") ? "&" : "?"}shop=${encodeURIComponent(shop)}` },
-        body: "",
-      };
-    }
-
-    // Default: minimal "connected" page that merchants can close
-    return html(
-      200,
-      `<!doctype html><meta charset="utf-8"><title>Connected</title>
-       <body style="font-family:system-ui;background:#0b0f14;color:#e8fff6;display:grid;place-items:center;height:100vh">
-       <div style="text-align:center;max-width:560px">
-         <h1 style="color:#42ffd2">SEOBoss connected</h1>
-         <p>Shop: <b>${shop}</b></p>
-         <p>You can close this tab and return to the app.</p>
-       </div></body>`
-    );
+      body: "",
+    };
   } catch (e) {
-    return json(500, { error: e?.message || String(e) });
+    // On error, still try to land in embedded Admin (best-effort)
+    const fallback = new URL(`${APP_BASE}/admin`);
+    if (shop) fallback.searchParams.set("shop", shop);
+    const host = (() => { try { return new URL(event.rawUrl).searchParams.get("host") || ""; } catch { return ""; } })();
+    if (host) fallback.searchParams.set("host", host);
+    fallback.searchParams.set("installed", "1");
+    return {
+      statusCode: 302,
+      headers: { Location: fallback.toString() },
+      body: "",
+    };
   }
 };
