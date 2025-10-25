@@ -91,6 +91,12 @@ force = true
   status = 200
   force = true
 
+  [[redirects]]
+  from = "/apps/engine/*"
+  to   = "/.netlify/functions/engine-proxy/:splat"
+  status = 200
+  force = true
+
 
 # App Proxy → Engine Proxy function
 [[redirects]]
