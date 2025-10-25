@@ -1,137 +1,27 @@
+# netlify.toml (root of the deployed site)
+
 [build]
   functions = "netlify/functions"
 
 [functions]
   node_bundler = "esbuild"
-  # ensure the module is loaded from root node_modules at runtime
-  external_node_modules = ["@supabase/supabase-js", "googleapis"]
 
-[build.environment]
-  NODE_VERSION = "20"
-
-# Enforce HTTPS & basic headers
-[[headers]]
-  for = "/*"
-  [headers.values]
-    Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
-    X-Content-Type-Options = "nosniff"
-    X-Frame-Options = "DENY"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-    X-XSS-Protection = "1; mode=block"
-
-
-# App Proxy → Job functions
-[[redirects]]
-from = "/v3/job/start"
-to   = "/.netlify/functions/start"
-status = 200
-force = true
-
-[[redirects]]
-from = "/v3/job/result"
-to   = "/.netlify/functions/result"
-status = 200
-force = true
-
-# --- Admin page (embedded UI) ---
-[[redirects]]
-  from = "/admin"
-  to = "/admin/"
-  status = 301
-
+# Admin SPA
 [[redirects]]
   from = "/admin/*"
-  to = "/admin/index.html"
+  to   = "/admin/index.html"
   status = 200
 
-# --- Optional: specific function routes (before catch-all) ---
-# If you add a standalone whoami function:
+# ✅ Primary: App Proxy catch-all → relay
 [[redirects]]
-  from = "/seoboss/api/whoami"
-  to = "/.netlify/functions/whoami"
-  status = 200
-
-
-
-
-# Catch-all relay for SEOBoss API
-[[redirects]]
-  from = "/seoboss/api/*"
-  to = "/.netlify/functions/relay/seoboss/api/:splat"
+  from = "/apps/engine/*"
+  to   = "/.netlify/functions/relay/:splat"
   status = 200
   force = true
 
-# Vault endpoints (App Proxy → Functions)
+# (Optional) If Shopify ever forwards without the prefix for some reason
 [[redirects]]
-  from = "/apps/engine/v3/vault/list"
-  to = "/.netlify/functions/vault-list"
-  status = 200
-  force = true
-
-  [[redirects]]
-  from = "/apps/engine/v3/vault/add"
-  to = "/.netlify/functions/vault-add"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/apps/engine/v3/vault/update"
-  to = "/.netlify/functions/vault-update"
-  status = 200
-  force = true
-
-# Vault endpoints (App Proxy → Functions)
-[[redirects]]
-  from = "/apps/engine/v3/vault/delete"
-  to   = "/.netlify/functions/vault-delete"
-  status = 200
-  force = true
-
-
-# App Proxy → Engine Proxy function
-[[redirects]]
-  from = "/proxy/*"
-  to = "/.netlify/functions/engine-proxy/:splat"
-  status = 200
-  force = true
-
-
-
-  # Vault endpoints that Shopify App Proxy actually forwards to your site
-[[redirects]]
-  from = "/v3/vault/list"
-  to = "/.netlify/functions/vault-list"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/v3/vault/add"
-  to = "/.netlify/functions/vault-add"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/v3/vault/update"
-  to = "/.netlify/functions/vault-update"
-  status = 200
-  force = true
-
-# (Optional convenience if you ever hit them directly)
-[[redirects]]
-  from = "/v3/vault/delete"
-  to   = "/.netlify/functions/vault-delete"
-  status = 200
-  force = true
-
-
-[[redirects]]
-  from = "/apps/engine/v3/vault/add"
-  to = "/.netlify/functions/vault-add"
-  status = 200
-  force = true
-
-[[redirects]]
-  from = "/apps/engine/v3/vault/update"
-  to = "/.netlify/functions/vault-update"
+  from = "/engine/*"
+  to   = "/.netlify/functions/relay/:splat"
   status = 200
   force = true
