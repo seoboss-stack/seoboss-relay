@@ -144,3 +144,9 @@ force = true
   to = "/.netlify/functions/vault-update"
   status = 200
   force = true
+
+  [[redirects]]
+  from = "/apps/engine/*"
+  to   = "/.netlify/functions/relay/:splat"
+  status = 200
+  force = true
