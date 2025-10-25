@@ -3,11 +3,12 @@ import crypto from "node:crypto";
 
 /** ENV you should set (exact names) */
 const APP_BASE  = (process.env.PUBLIC_BASE_URL || process.env.APP_URL || "https://hooks.seoboss.com").replace(/\/$/, "");
-const API_KEY   = process.env.SHOPIFY_API_KEY || "";      // <- use ONLY these two
-const SECRET    = process.env.SHOPIFY_API_SECRET || "";   // <- private API secret (required)
-const N8N_URL   = process.env.N8N_ONBOARD_SUBMIT_URL || "";
-const FWD_SECRET = process.env.FORWARD_SECRET || "";
+const API_KEY = process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
+const SECRET = process.env.SHOPIFY_APP_SECRET_PUBLIC || process.env.SHOPIFY_APP_SECRET || "";
+const ONBOARD_URL = process.env.N8N_ONBOARD_SUBMIT_URL; // https://.../webhook/seoboss/api/onboarding/submit
 const PUBLIC_HMAC_KEY = process.env.PUBLIC_HMAC_KEY || "";
+const FWD_SECRET = process.env.FORWARD_SECRET || "";
+
 
 /* ---------- helpers ---------- */
 
