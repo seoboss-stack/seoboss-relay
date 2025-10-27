@@ -53,127 +53,83 @@ export default async (req) => {
     const status  = active ? (inTrial ? 'trial' : 'active') : 'inactive';
     const trial_days_left = inTrial ? Math.ceil((trialUntil - now) / (24*60*60*1000)) : 0;
 
-    // ---------- USAGE (prefer view, fallback to jobs) ----------
-    let used_articles_this_month = 0;
-    let used_kw_basic_this_month = 0;
-    let used_kw_ai_this_month    = 0;
-    let used_units_this_month    = 0;
+  // ---------- USAGE (view when present; fill any missing via jobs, UTC month) ----------
+let used_articles_this_month = 0;
+let used_kw_basic_this_month = 0;
+let used_kw_ai_this_month    = 0;
+let used_units_this_month    = 0;
 
-    // Try your v2 view first (yesterday's addition)
-    // Expect columns like: used_articles_this_month, used_kw_basic_this_month, used_kw_ai_this_month, used_units_this_month
-    const { data: v2, error: v2Err } =
-      await supa.from('billing_plans_with_usage').select('*').eq('shop', shop).maybeSingle();
+const { data: v2, error: v2Err } =
+  await supa.from('billing_plans_with_usage').select('*').eq('shop', shop).maybeSingle();
 
-    if (!v2Err && v2) {
-      used_articles_this_month = v2.used_articles_this_month ?? 0;
-      used_kw_basic_this_month = v2.used_kw_basic_this_month ?? 0;
-      used_kw_ai_this_month    = v2.used_kw_ai_this_month ?? 0;
-      used_units_this_month    = v2.used_units_this_month ?? 0;
-    } else {
-      // Fallback: compute from jobs (current UTC month)
-      const monthStart = new Date();
-      monthStart.setUTCDate(1); monthStart.setUTCHours(0,0,0,0);
-      const since = monthStart.toISOString();
+const hasV2 = !v2Err && v2;
+if (hasV2) {
+  used_articles_this_month = v2.used_articles_this_month ?? 0;
+  used_kw_basic_this_month = v2.used_kw_basic_this_month ?? 0;
+  used_kw_ai_this_month    = v2.used_kw_ai_this_month ?? 0;
+  used_units_this_month    = v2.used_units_this_month ?? 0;
+}
 
-      // Articles (legacy null treated as article)
-      {
-        const { count, error } = await supa
-          .from('jobs')
-          .select('job_id', { count:'exact', head:true })
-          .eq('shop', shop).eq('status', 'done')
-          .or('action.eq.article,action.is.null')
-          .gte('created_at', since);
-        
-        // ✅ ADD THIS - Log if articles count fails
-        if (error) {
-          await errlog({
-            shop,
-            route: '/billing-status',
-            status: 500,
-            message: 'Failed to count articles',
-            detail: error.message,
-            request_id,
-            code: 'E_DB_COUNT'
-          });
-          return json({ error:'count_failed_articles', detail:error.message }, 500);
-        }
-        used_articles_this_month = count || 0;
-      }
+// Compute UTC month window once
+const monthStart = new Date();
+monthStart.setUTCDate(1); monthStart.setUTCHours(0,0,0,0);
+const since = monthStart.toISOString();
 
-      // Keywords basic (search + buyer + questions)
-      {
-        const { count, error } = await supa
-          .from('jobs')
-          .select('job_id', { count:'exact', head:true })
-          .eq('shop', shop).eq('status', 'done')
-          .in('action', ['keyword_search','keyword_buyer','keyword_questions'])
-          .gte('created_at', since);
-        
-        // ✅ ADD THIS - Log if keyword_basic count fails
-        if (error) {
-          await errlog({
-            shop,
-            route: '/billing-status',
-            status: 500,
-            message: 'Failed to count keyword_basic usage',
-            detail: error.message,
-            request_id,
-            code: 'E_DB_COUNT'
-          });
-          return json({ error:'count_failed_kw_basic', detail:error.message }, 500);
-        }
-        used_kw_basic_this_month = count || 0;
-      }
+// Backfill any missing metric from jobs (keep error logging)
+if (!hasV2 || v2.used_articles_this_month == null) {
+  const { count, error } = await supa
+    .from('jobs')
+    .select('job_id', { count:'exact', head:true })
+    .eq('shop', shop).eq('status', 'done')
+    .or('action.eq.article,action.is.null')
+    .gte('created_at', since);
+  if (error) {
+    await errlog({ shop, route: '/billing-status', status: 500, message: 'Failed to count articles', detail: error.message, request_id, code: 'E_DB_COUNT' });
+    return json({ error:'count_failed_articles', detail:error.message }, 500);
+  }
+  used_articles_this_month = count || 0;
+}
 
-      // Keywords AI
-      {
-        const { count, error } = await supa
-          .from('jobs')
-          .select('job_id', { count:'exact', head:true })
-          .eq('shop', shop).eq('status', 'done')
-          .eq('action', 'keyword_ai')
-          .gte('created_at', since);
-        
-        // ✅ ADD THIS - Log if keyword_ai count fails
-        if (error) {
-          await errlog({
-            shop,
-            route: '/billing-status',
-            status: 500,
-            message: 'Failed to count keyword_ai usage',
-            detail: error.message,
-            request_id,
-            code: 'E_DB_COUNT'
-          });
-          return json({ error:'count_failed_kw_ai', detail:error.message }, 500);
-        }
-        used_kw_ai_this_month = count || 0;
-      }
+if (!hasV2 || v2.used_kw_basic_this_month == null) {
+  const { count, error } = await supa
+    .from('jobs')
+    .select('job_id', { count:'exact', head:true })
+    .eq('shop', shop).eq('status', 'done')
+    .in('action', ['keyword_search','keyword_buyer','keyword_questions'])
+    .gte('created_at', since);
+  if (error) {
+    await errlog({ shop, route: '/billing-status', status: 500, message: 'Failed to count keyword_basic usage', detail: error.message, request_id, code: 'E_DB_COUNT' });
+    return json({ error:'count_failed_kw_basic', detail:error.message }, 500);
+  }
+  used_kw_basic_this_month = count || 0;
+}
 
-      // Units sum (optional)
-      {
-        const { data: rows, error } = await supa
-          .from('jobs')
-          .select('cost_units')
-          .eq('shop', shop).eq('status', 'done')
-          .gte('created_at', since);
-        
-        // ✅ ADD THIS - Log if units sum fails
-        if (error) {
-          await errlog({
-            shop,
-            route: '/billing-status',
-            status: 500,
-            message: 'Failed to sum cost units',
-            detail: error.message,
-            request_id,
-            code: 'E_DB_COUNT'
-          });
-          return json({ error:'units_sum_failed', detail:error.message }, 500);
-        }
-        used_units_this_month = (rows || []).reduce((a,r)=>a+(r?.cost_units||0), 0);
-      }
-    }
+if (!hasV2 || v2.used_kw_ai_this_month == null) {
+  const { count, error } = await supa
+    .from('jobs')
+    .select('job_id', { count:'exact', head:true })
+    .eq('shop', shop).eq('status', 'done')
+    .eq('action', 'keyword_ai')
+    .gte('created_at', since);
+  if (error) {
+    await errlog({ shop, route: '/billing-status', status: 500, message: 'Failed to count keyword_ai usage', detail: error.message, request_id, code: 'E_DB_COUNT' });
+    return json({ error:'count_failed_kw_ai', detail:error.message }, 500);
+  }
+  used_kw_ai_this_month = count || 0;
+}
+
+if (!hasV2 || v2.used_units_this_month == null) {
+  const { data: rows, error } = await supa
+    .from('jobs')
+    .select('cost_units')
+    .eq('shop', shop).eq('status', 'done')
+    .gte('created_at', since);
+  if (error) {
+    await errlog({ shop, route: '/billing-status', status: 500, message: 'Failed to sum cost units', detail: error.message, request_id, code: 'E_DB_COUNT' });
+    return json({ error:'units_sum_failed', detail:error.message }, 500);
+  }
+  used_units_this_month = (rows || []).reduce((a,r)=>a+(r?.cost_units||0), 0);
+}
 
     // Back-compat: your original "used_this_month" equals article count
     const used_this_month = used_articles_this_month;
