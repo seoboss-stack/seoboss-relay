@@ -1,3 +1,4 @@
+// netlify/functions/billing-subscribe.mjs
 import { sb, json, CORS } from './_lib/_supabase.mjs';
 import { errlog } from './_lib/_errlog.mjs';
 
@@ -69,6 +70,42 @@ export default async (req) => {
 
     const supa = sb();
 
+    // ⛑ SAFETY GUARD — prevent seed plans from overwriting paid/active plans
+    const paidPlans = new Set(['pro','scale']);
+    const seedPlans = new Set(['trial','starter']);
+
+    const { data: existing, error: lookupErr } =
+      await supa.from('billing_plans')
+        .select('shop, plan, active, monthly_cap, caps_json, trial_expires_at, created_at, updated_at, bonus_cap')
+        .eq('shop', shop)
+        .maybeSingle();
+
+    if (lookupErr) {
+      await errlog({
+        shop, route: '/billing-subscribe', status: 500,
+        message: 'Plan lookup failed',
+        detail: lookupErr.message, request_id, code: 'E_DB_READ'
+      });
+      return json({ error: 'plan_lookup_failed', detail: lookupErr.message }, 500);
+    }
+
+    if (existing) {
+      const currentPlan = (existing.plan || '').toLowerCase();
+      const isPaidActive = paidPlans.has(currentPlan) && !!existing.active;
+      const incomingIsSeed = seedPlans.has(planKey);
+
+      // If already paid & active, ignore trial/starter writes
+      if (isPaidActive && incomingIsSeed) {
+        return json({ ok: true, row: existing, skipped: 'already_paid' }, 200);
+      }
+
+      // If we’re idempotently setting the same paid plan again, just return existing
+      if (paidPlans.has(planKey) && currentPlan === planKey && !!existing.active) {
+        return json({ ok: true, row: existing, skipped: 'already_set' }, 200);
+      }
+    }
+    // ⛑ END GUARD
+
     if (planKey === 'trial') {
       // Store as starter while trial is active
       const { monthly_cap, caps_json } = capsFor('starter');
@@ -105,7 +142,7 @@ export default async (req) => {
 
       return json({
         ok: true,
-        row: data, // ← echo back what the DB actually has
+        row: data,
         confirmation_url: `/apps/engine/thanks?plan=trial&trial_until=${encodeURIComponent(until.toISOString())}`,
       }, 200);
     }
@@ -144,7 +181,7 @@ export default async (req) => {
 
     return json({
       ok: true,
-      row: data, // ← echo the row for visibility
+      row: data,
       confirmation_url: `/apps/engine/thanks?plan=${encodeURIComponent(planKey)}`,
     }, 200);
 
