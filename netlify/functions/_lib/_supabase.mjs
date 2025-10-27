@@ -5,7 +5,8 @@ import { createClient } from '@supabase/supabase-js';
 export const CORS = {
   'access-control-allow-origin': '*',
   'access-control-allow-methods': 'GET,POST,OPTIONS',
-  'access-control-allow-headers': 'content-type, x-seoboss-version',
+  // add the headers you actually use from the browser/app
+  'access-control-allow-headers': 'content-type, x-seoboss-version, x-seoboss-forward-secret, x-request-id',
 };
 
 // Supabase client (service role key; no session persistence on server)
