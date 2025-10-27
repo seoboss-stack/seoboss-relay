@@ -38,6 +38,16 @@ function capsFor(planKey) {
   };
 }
 
+function normShop(s){
+  return String(s)
+    .trim().toLowerCase()
+    .replace(/^https?:\/\//,'')
+    .replace(/[?#].*$/,'')
+    .replace(/\/.*/,'')
+    .replace(/:\d+$/,'')
+    .replace(/\.shopify\.com$/i, '.myshopify.com');
+}
+
 export default async (req) => {
   if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS });
   if (req.method !== 'POST')    return json({ error: 'POST only' }, 405);
@@ -49,9 +59,10 @@ export default async (req) => {
     body = await req.json().catch(() => ({}));
 
     const u = new URL(req.url);
-    const shop = (u.searchParams.get('shop') || body.shop || '').toLowerCase().trim();
+    const rawShop   = u.searchParams.get('shop') || body.shop || '';
+    const shop      = normShop(rawShop);
     const requested = (body.plan || 'starter').toLowerCase().trim();
-    const planKey = normalizePlan(requested);
+    const planKey   = normalizePlan(requested);
     const trialDays = Number.isFinite(+body.trial_days) ? Math.max(0, +body.trial_days) : 0;
 
     if (!shop) return json({ error: 'Missing shop' }, 400);
@@ -63,17 +74,21 @@ export default async (req) => {
       const { monthly_cap, caps_json } = capsFor('starter');
       const until = new Date(Date.now() + (trialDays || 3) * 86400 * 1000);
 
-      const { error } = await supa
+      const payload = {
+        shop,
+        plan: 'starter',
+        active: true,
+        monthly_cap,
+        caps_json,
+        trial_started_at: new Date().toISOString(),
+        trial_expires_at: until.toISOString(),
+      };
+
+      const { data, error } = await supa
         .from('billing_plans')
-        .upsert({
-          shop,
-          plan: 'starter',
-          active: true,
-          monthly_cap,
-          caps_json,
-          trial_started_at: new Date().toISOString(),
-          trial_expires_at: until.toISOString(),
-        }, { onConflict: 'shop' });
+        .upsert(payload, { onConflict: 'shop' })
+        .select()
+        .maybeSingle();
 
       if (error) {
         await errlog({
@@ -90,6 +105,7 @@ export default async (req) => {
 
       return json({
         ok: true,
+        row: data, // ← echo back what the DB actually has
         confirmation_url: `/apps/engine/thanks?plan=trial&trial_until=${encodeURIComponent(until.toISOString())}`,
       }, 200);
     }
@@ -97,17 +113,21 @@ export default async (req) => {
     // Regular paid plan
     const { monthly_cap, caps_json } = capsFor(planKey);
 
-    const { error } = await supa
+    const payload = {
+      shop,
+      plan: planKey,
+      active: true,
+      monthly_cap,
+      caps_json,
+      trial_started_at: null,
+      trial_expires_at: null,
+    };
+
+    const { data, error } = await supa
       .from('billing_plans')
-      .upsert({
-        shop,
-        plan: planKey,
-        active: true,
-        monthly_cap,
-        caps_json,
-        trial_started_at: null,
-        trial_expires_at: null,
-      }, { onConflict: 'shop' });
+      .upsert(payload, { onConflict: 'shop' })
+      .select()
+      .maybeSingle();
 
     if (error) {
       await errlog({
@@ -124,6 +144,7 @@ export default async (req) => {
 
     return json({
       ok: true,
+      row: data, // ← echo the row for visibility
       confirmation_url: `/apps/engine/thanks?plan=${encodeURIComponent(planKey)}`,
     }, 200);
 
