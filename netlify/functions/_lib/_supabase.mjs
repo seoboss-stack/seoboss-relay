@@ -1,4 +1,4 @@
-// netlify/shared/_supabase.mjs
+// netlify/functions/_lib/_supabase.mjs  ← correct path in comment
 import { createClient } from '@supabase/supabase-js';
 
 // CORS headers for browser → Netlify Functions (OPTIONS + actual reqs)
