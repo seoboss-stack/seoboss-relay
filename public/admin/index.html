@@ -339,48 +339,66 @@
   };
   function paintClientId(id){ if(!id) return; clientIdHidden.value=id; clientIdDisplay.textContent=id; clientIdBadge.style.display=''; }
 
-async function subscribePlan(shop) {
-  const url = window.SEO_BOSS.billingSubscribe?.();
-  if (!url || !shop) return { ok:false, skipped:'no_url_or_shop' };
+  // === GATING HELPERS (ADDED) ===
+  const gated = { interlinking, engineCard, installCard };
+  function hasProfileMinimum(){
+    const cached = store.read() || {};
+    const niche = (el.niche.value || cached.niche || '').trim();
+    const shop  = (cached.shop_url || '').trim() || (typeof SHOP_FROM_URL === 'string' ? SHOP_FROM_URL.trim() : '');
+    return !!(cached.id && shop && niche);
+  }
+  function gateSections(forceShow){
+    const show = (typeof forceShow === 'boolean') ? forceShow : hasProfileMinimum();
+    Object.values(gated).forEach(sec => { if (sec) sec.style.display = show ? '' : 'none'; });
+    const sub = document.querySelector('.head .sub');
+    if (sub) {
+      sub.textContent = show
+        ? 'Connected — you can import posts and open your workspace.'
+        : 'Connected — set your Niche and click “Save Preferences” to unlock importing and the engine.';
+    }
+  }
 
-  // Pull current plan from UI/URL/defaults
-  const ui = window.SEO_BOSS._planUI || {};
-  const qs = new URLSearchParams(location.search);
-  const plan = (ui.planSel?.value || qs.get('plan') || localStorage.getItem('seoboss:plan') || 'pro').toLowerCase();
-  const trialDays = Number(ui.trialInp?.value || qs.get('trial_days') || 3) || 3;
+  async function subscribePlan(shop) {
+    const url = window.SEO_BOSS.billingSubscribe?.();
+    if (!url || !shop) return { ok:false, skipped:'no_url_or_shop' };
 
-  const payload = { shop, plan };
-  if (plan === 'trial') payload.trial_days = trialDays;
+    // Pull current plan from UI/URL/defaults
+    const ui = window.SEO_BOSS._planUI || {};
+    const qs = new URLSearchParams(location.search);
+    const plan = (ui.planSel?.value || qs.get('plan') || localStorage.getItem('seoboss:plan') || 'pro').toLowerCase();
+    const trialDays = Number(ui.trialInp?.value || qs.get('trial_days') || 3) || 3;
 
-  try { localStorage.setItem('seoboss:plan', plan); } catch {}
+    const payload = { shop, plan };
+    if (plan === 'trial') payload.trial_days = trialDays;
 
-  const r = await fetch(url, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json', 'accept':'application/json' },
-    body: JSON.stringify(payload)
-  });
-  const d = await r.json().catch(()=>({}));
-  return d;
-}
+    try { localStorage.setItem('seoboss:plan', plan); } catch {}
 
-async function paintPlanStatus(shop){
-  try{
-    const r = await fetch(`https://hooks.seoboss.com/.netlify/functions/billing-status?shop=${encodeURIComponent(shop)}`);
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'accept':'application/json' },
+      body: JSON.stringify(payload)
+    });
     const d = await r.json().catch(()=>({}));
-    if (d && d.plan) {
-      const badge = document.getElementById('savedSummary');
-      if (badge) {
-        const prev = badge.textContent || '';
-        const parts = prev.split(' · ');
-        if (parts.length) {
-          parts[parts.length - 1] = (parts[parts.length - 1] || '').replace(/\s*\(.*\)\s*$/,'');
-          badge.textContent = parts.join(' · ') + ` · plan=${d.plan}`;
+    return d;
+  }
+
+  async function paintPlanStatus(shop){
+    try{
+      const r = await fetch(`https://hooks.seoboss.com/.netlify/functions/billing-status?shop=${encodeURIComponent(shop)}`);
+      const d = await r.json().catch(()=>({}));
+      if (d && d.plan) {
+        const badge = document.getElementById('savedSummary');
+        if (badge) {
+          const prev = badge.textContent || '';
+          const parts = prev.split(' · ');
+          if (parts.length) {
+            parts[parts.length - 1] = (parts[parts.length - 1] || '').replace(/\s*\(.*\)\s*$/,'');
+            badge.textContent = parts.join(' · ') + ` · plan=${d.plan}`;
+          }
         }
       }
-    }
-  }catch{}
-}
-
+    }catch{}
+  }
 
   // ===== Endpoints bridge =====
  (function initBridge(root, el){
@@ -421,7 +439,6 @@ async function paintPlanStatus(shop){
   root.SEO_BOSS._planUI = { planSel, trialInp };
 })(window, rootEl);
 
-
   // ===== Install detect & prefill =====
   let INSTALLED_MODE = false;
   let SHOP_FROM_URL = '';
@@ -439,63 +456,67 @@ async function paintPlanStatus(shop){
       $('#tokenRow').style.display = 'none';
       el.onboardBtn.textContent = 'Save Preferences';
       $('.head .sub').textContent = 'Connected via the Shopify app — no admin token needed.';
+      // Require Niche in installed flow (ADDED)
+      el.niche.required = true;
+
       if (!SHOP_FROM_URL) {
         const cachedShop = (store.read()?.shop_url || '').toLowerCase();
         if (cachedShop) SHOP_FROM_URL = cachedShop;
       }
       if (SHOP_FROM_URL) { el.shopInput.value = SHOP_FROM_URL; el.shopInput.disabled = true; }
+
       if (AUTO_DISCOVER_BLOGS && SHOP_FROM_URL) autoFetchBlogs();
-      interlinking.style.display = ''; // show interlinking card after install
-      // if we already know client + shop, expose install card
-      showInstallCardIfReady();
+
+      // (REPLACED) don't force-show; let gate decide
+      gateSections();             // decide based on cache/inputs
+      showInstallCardIfReady();   // URL wiring; visibility still gated
     }
   })();
 
-// After the prefill IIFE ends:
-if (SHOP_FROM_URL) { try { paintPlanStatus(SHOP_FROM_URL); } catch {} }
+  // After the prefill IIFE ends (ADDED):
+  if (SHOP_FROM_URL) { try { paintPlanStatus(SHOP_FROM_URL); } catch {} }
+  try { gateSections(); } catch {}
 
+  // ===== Blog loader (GET only) =====
+  async function autoFetchBlogs(){
+    const url  = window.SEO_BOSS.fetchBlogs();
+    const shop = (SHOP_FROM_URL || store.read()?.shop_url || '').trim();
+    if (!url || !shop) return;
 
-// ===== Blog loader (GET only) =====
-async function autoFetchBlogs(){
-  const url  = window.SEO_BOSS.fetchBlogs();
-  const shop = (SHOP_FROM_URL || store.read()?.shop_url || '').trim();
-  if (!url || !shop) return;
+    try {
+      const rsp = await fetch(`${url}?shop=${encodeURIComponent(shop)}`);
+      const d   = await rsp.json();
 
-  try {
-    const rsp = await fetch(`${url}?shop=${encodeURIComponent(shop)}`);
-    const d   = await rsp.json();
+      if (rsp.ok && d.ok && Array.isArray(d.blogs)) {
+        const sel = el.blogSelect; 
+        sel.innerHTML = '';
 
-    if (rsp.ok && d.ok && Array.isArray(d.blogs)) {
-      const sel = el.blogSelect; 
-      sel.innerHTML = '';
+        d.blogs.forEach(b => {
+          const opt = document.createElement('option');
+          opt.value = String(b.id);
+          opt.textContent = b.title || b.handle || ('Blog ' + b.id);
+          sel.appendChild(opt);
+        });
 
-      d.blogs.forEach(b => {
-        const opt = document.createElement('option');
-        opt.value = String(b.id);
-        opt.textContent = b.title || b.handle || ('Blog ' + b.id);
-        sel.appendChild(opt);
-      });
+        if (d.default_blog_id) sel.value = String(d.default_blog_id);
 
-      if (d.default_blog_id) sel.value = String(d.default_blog_id);
+        if (sel.options.length) el.blogRow.style.display = '';
 
-      // only show if we populated options
-      if (sel.options.length) el.blogRow.style.display = '';
-
-      // cache client/shop if backend returned client_id
-      if (d.client_id) {
-        store.save({ ...(store.read()||{}), id: d.client_id, shop_url: shop });
-        paintClientId(d.client_id);
+        if (d.client_id) {
+          store.save({ ...(store.read()||{}), id: d.client_id, shop_url: shop });
+          paintClientId(d.client_id);
+        }
+      } else if (DEV) {
+        console.warn('[autoFetchBlogs] unexpected response', { status: rsp.status, body: d });
       }
-    } else if (DEV) {
-      console.warn('[autoFetchBlogs] unexpected response', { status: rsp.status, body: d });
+    } catch (e) {
+      if (DEV) console.warn('[autoFetchBlogs] error', e);
+    } finally {
+      // paint plan + gating regardless of outcome (ADDED)
+      try { await paintPlanStatus(shop); } catch {}
+      try { gateSections(); } catch {}
     }
-  } catch (e) {
-    if (DEV) console.warn('[autoFetchBlogs] error', e);
-  } finally {
-    // paint plan status regardless of fetch outcome
-    try { await paintPlanStatus(shop); } catch {}
   }
-}
 
   // ===== Import existing posts (interlinking) =====
   importBtn?.addEventListener('click', async ()=>{
@@ -512,7 +533,6 @@ async function autoFetchBlogs(){
       const d = await readJSON(r);
       if(!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
 
-      // summary + preview (show up to 10)
       const sample = Array.isArray(d.sample) ? d.sample.slice(0,10) : [];
       const parts = [
         `Imported ${d.imported ?? '—'} posts`,
@@ -543,8 +563,9 @@ async function autoFetchBlogs(){
         engineCard.style.display = '';
       }
 
-      // expose install card after import (we now definitely have client+shop in store)
+      // Expose install only if gated conditions are met
       showInstallCardIfReady();
+      gateSections(); // in case client/shop cached now
 
     }catch(err){
       importMsg.textContent = 'Could not start import: ' + (err.message || 'Unknown');
@@ -559,11 +580,9 @@ async function autoFetchBlogs(){
     const shop = (client.shop_url || '').toLowerCase();
     if (!client.id || !shop) return;
 
-    // App Proxy console URL (fallback to hidden page if returned by backend)
     const proxyUrl = `https://${shop}/apps/seoboss/console?client_id=${encodeURIComponent(client.id)}`;
     if (openConsoleBtn) openConsoleBtn.href = proxyUrl;
 
-    // Embeddable snippet
     const embed = [
       `<div id="seoboss-console"`,
       `     data-client-id="${client.id}"`,
@@ -572,7 +591,7 @@ async function autoFetchBlogs(){
     ].join('\n');
     if (snippetArea) snippetArea.value = embed;
 
-    installCard.style.display = '';
+    // visibility still controlled by gateSections()
   }
 
   installBtn?.addEventListener('click', async ()=>{
@@ -607,155 +626,82 @@ async function autoFetchBlogs(){
  $('#bossForm')?.addEventListener('submit', async (e)=>{
   e.preventDefault();
 
-  // Guard against double-clicks / repeated submits
   if (el.onboardBtn.disabled) return;
 
   const submitURL = window.SEO_BOSS.onboardSubmit();
   const updateURL = window.SEO_BOSS.updateProfile();
 
+  const contact_email    = (el.contactEmail.value||'').trim();
+  const default_language = (el.defaultLanguage.value||'en').trim().toLowerCase();
+  const shop_input       = (el.shopInput.value||'').trim().toLowerCase();
+  const admin_token      = (el.adminToken.value||'').trim();
+  const tone             = (el.tone.value||'').trim();
+  const niche            = (el.niche.value||'').trim();
+  const seed_keywords    = (el.seedKeywords.value||'').trim();
+  const target_audience  = (el.targetAudience.value||'').trim();
+  const default_blog_id  = (el.blogSelect?.value || '').trim();
 
-    const contact_email    = (el.contactEmail.value||'').trim();
-    const default_language = (el.defaultLanguage.value||'en').trim().toLowerCase();
-    const shop_input       = (el.shopInput.value||'').trim().toLowerCase();
-    const admin_token      = (el.adminToken.value||'').trim();
-    const tone             = (el.tone.value||'').trim();
-    const niche            = (el.niche.value||'').trim();
-    const seed_keywords    = (el.seedKeywords.value||'').trim();
-    const target_audience  = (el.targetAudience.value||'').trim();
-    const default_blog_id  = (el.blogSelect?.value || '').trim();
+  if(!shop_input || !contact_email){
+    result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Please complete required fields.</span>'; return;
+  }
 
-    if(!shop_input || !contact_email){
-      result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Please complete required fields.</span>'; return;
-    }
+  const installed = location.search.includes('installed=1');
 
-    const installed = location.search.includes('installed=1');
+  // ===== Installed mode → Save Preferences (PATCH) =====
+  if (installed) {
+    if(!updateURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Profile endpoint not set.</span>'; return; }
 
-    // ===== Installed mode → Save Preferences (PATCH) =====
-    if (installed) {
-      if(!updateURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Profile endpoint not set.</span>'; return; }
-
-      const client = store.read() || {};
-      if (client.id) paintClientId(client.id);
-
-      const patch = {
-        client_id: client.id || clientIdHidden.value || '',
-        shop: client.shop_url || shop_input,
-        contact_email:    maybe(contact_email),
-        default_language: maybe(default_language),
-        tone:             maybe(tone),
-        niche:            maybe(niche),
-        seed_keywords:    maybe(seed_keywords),
-        target_audience:  maybe(target_audience),
-        ...(default_blog_id ? { default_blog_id } : {}),
-        idem: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()))
-      };
-
-      setBusy(el.onboardBtn,true,'Saving…');
-      result.style.display='block'; result.textContent = 'Saving your preferences…';
-
-      try{
-        const r = await signedPost(updateURL, patch);
-        const data = await readJSON(r);
-        if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Save failed');
-
-        const updated = { ...client,
-          id: client.id || data.client_id || '',
-          shop_url: client.shop_url || shop_input,
-          language: default_language,
-          ...(tone ? { tone } : {}),
-          ...(niche ? { niche } : {}),
-          ...(seed_keywords ? { seed_keywords } : {}),
-          ...(target_audience ? { target_audience } : {}),
-          ...(default_blog_id ? { default_blog_id } : {})
-        };
-        store.save(updated);
-if (updated.id) paintClientId(updated.id);
-
-savedBadge.style.display = 'flex';
-savedSummary.textContent = `${updated.id || 'cli_…'} · ${updated.shop_url || shop_input} · ${updated.language || default_language}`;
-
-        statusDot.style.background = 'var(--mint)';
-        result.innerHTML = '<strong>Preferences saved.</strong>';
-
-        // Blog picker from backend, else auto
-        if (Array.isArray(data.blogs_list) && data.blogs_list.length) {
-          const sel = el.blogSelect; sel.innerHTML = '';
-          data.blogs_list.forEach(b=>{
-            const opt = document.createElement('option');
-            opt.value = String(b.id);
-            opt.textContent = b.title || b.handle || ('Blog ' + b.id);
-            sel.appendChild(opt);
-          });
-          if (data.default_blog_id) sel.value = String(data.default_blog_id);
-          el.blogRow.style.display = '';
-        } else {
-          autoFetchBlogs();
-        }
-
-        // Workspace link
-if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
-else if (client.sheet_url) { openSheetBtn.href = client.sheet_url; engineCard.style.display = ''; }
-
-// Plan subscribe (idempotent; safe on repeats)
-const chosenShop = (client.shop_url || shop_input).toLowerCase();
-try {
-  const sub = await subscribePlan(chosenShop);
-  if (DEV) console.log('[SEOBoss billing-subscribe:installed]', sub);
-  // paint status for UX
-  paintPlanStatus(chosenShop);
-} catch { /* silent */ }
-
-// Now that we know client + shop, reveal install
-showInstallCardIfReady();
-
-
-      }catch(err){
-        result.innerHTML = `<span style="color:#ff9b9b">❌ ${err.message || 'Failed to save'}</span>`;
-        statusDot.style.background = '#ff8b8b'; statusDot.style.boxShadow = '0 0 10px rgba(255,100,100,.9)';
-      }finally{
-        setBusy(el.onboardBtn,false);
-      }
+    // Require niche to unlock
+    if (!niche) {
+      result.style.display='block';
+      result.innerHTML = '<span style="color:#ff9b9b">Please enter a Niche to continue.</span>';
       return;
     }
 
-    // ===== Non-installed path → full onboarding (requires token) =====
-    if(!submitURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Onboarding submit endpoint not set.</span>'; return; }
-    if(!admin_token){
-      result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Admin token is required to connect.</span>'; return;
-    }
+    const client = store.read() || {};
+    if (client.id) paintClientId(client.id);
 
-    setBusy(el.onboardBtn,true,'Connecting…');
-    result.style.display='block'; result.textContent = 'Setting up your engine… this can take up to a minute.';
+    const patch = {
+      client_id: client.id || clientIdHidden.value || '',
+      shop: client.shop_url || shop_input,
+      contact_email:    maybe(contact_email),
+      default_language: maybe(default_language),
+      tone:             maybe(tone),
+      niche:            maybe(niche),
+      seed_keywords:    maybe(seed_keywords),
+      target_audience:  maybe(target_audience),
+      ...(default_blog_id ? { default_blog_id } : {}),
+      idem: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()))
+    };
+
+    setBusy(el.onboardBtn,true,'Saving…');
+    result.style.display='block'; result.textContent = 'Saving your preferences…';
 
     try{
-      const payload = {
-        client_name: '',
-        contact_email,
-        default_language,
-        shop_input,
-        admin_token,
-        tone, niche, seed_keywords, target_audience
-      };
-      const r = await signedPost(submitURL, payload);
+      const r = await signedPost(updateURL, patch);
       const data = await readJSON(r);
-      if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Submit error');
+      if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Save failed');
 
-      const profile = {
-        id: data.client_id || (store.read().id || ''),
-        shop_url: data.shop_url || shop_input,
-        default_blog_id: data.default_blog_id || '',
+      const updated = { ...client,
+        id: client.id || data.client_id || '',
+        shop_url: client.shop_url || shop_input,
         language: default_language,
-        tone, niche, seed_keywords, target_audience,
-        ...(data.sheet_url ? { sheet_url: data.sheet_url } : {})
+        ...(tone ? { tone } : {}),
+        ...(niche ? { niche } : {}),
+        ...(seed_keywords ? { seed_keywords } : {}),
+        ...(target_audience ? { target_audience } : {}),
+        ...(default_blog_id ? { default_blog_id } : {})
       };
-      store.save(profile);
-if (profile.id) paintClientId(profile.id);
+      store.save(updated);
+      if (updated.id) paintClientId(updated.id);
 
-savedBadge.style.display = 'flex';
-savedSummary.textContent = `${profile.id || 'cli_…'} · ${profile.shop_url || shop_input} · ${profile.language || default_language}`;
+      savedBadge.style.display = 'flex';
+      savedSummary.textContent = `${updated.id || 'cli_…'} · ${updated.shop_url || shop_input} · ${updated.language || default_language}`;
 
       statusDot.style.background = 'var(--mint)';
+      result.innerHTML = '<strong>Preferences saved.</strong>';
 
+      // Blog picker from backend, else auto
       if (Array.isArray(data.blogs_list) && data.blogs_list.length) {
         const sel = el.blogSelect; sel.innerHTML = '';
         data.blogs_list.forEach(b=>{
@@ -766,39 +712,113 @@ savedSummary.textContent = `${profile.id || 'cli_…'} · ${profile.shop_url || 
         });
         if (data.default_blog_id) sel.value = String(data.default_blog_id);
         el.blogRow.style.display = '';
-      } else if (profile.id || profile.shop_url) {
+      } else {
         autoFetchBlogs();
       }
 
-      result.innerHTML = `
-        <strong>${data.message || 'Onboarding created'}</strong><br>
-        Client: <code>${profile.id || '—'}</code><br>
-        Shop: <code>${profile.shop_url}</code><br>
-        Status: <code>${data.status || 'awaiting_activation'}</code><br>
-        Blogs saved: <code>${data.counts?.blogs ?? '—'}</code>
-      `;
+      if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
+      else if (client.sheet_url) { openSheetBtn.href = client.sheet_url; engineCard.style.display = ''; }
 
-    if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
+      const chosenShop = (client.shop_url || shop_input).toLowerCase();
+      try {
+        const sub = await subscribePlan(chosenShop);
+        if (DEV) console.log('[SEOBoss billing-subscribe:installed]', sub);
+        paintPlanStatus(chosenShop);
+      } catch {}
 
-// Subscribe plan (idempotent; OK if this runs again later)
-const chosenShop = (profile.shop_url || shop_input).toLowerCase();
-try {
-  const sub = await subscribePlan(chosenShop);
-  if (DEV) console.log('[SEOBoss billing-subscribe:onboard]', sub);
-  paintPlanStatus(chosenShop);
-} catch { /* silent */ }
-
-// Reveal install card once onboarded
-showInstallCardIfReady();
-
+      // Unlock after successful save (ADDED)
+      gateSections(true);
+      showInstallCardIfReady();
 
     }catch(err){
-      result.innerHTML = `<span style="color:#ff9b9b">❌ ${err.message || 'Failed to connect'}</span>`;
+      result.innerHTML = `<span style="color:#ff9b9b">❌ ${err.message || 'Failed to save'}</span>`;
       statusDot.style.background = '#ff8b8b'; statusDot.style.boxShadow = '0 0 10px rgba(255,100,100,.9)';
     }finally{
       setBusy(el.onboardBtn,false);
     }
-  });
+    return;
+  }
+
+  // ===== Non-installed path → full onboarding (requires token) =====
+  if(!submitURL){ result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Onboarding submit endpoint not set.</span>'; return; }
+  if(!admin_token){
+    result.style.display='block'; result.innerHTML = '<span style="color:#ff9b9b">Admin token is required to connect.</span>'; return;
+  }
+
+  setBusy(el.onboardBtn,true,'Connecting…');
+  result.style.display='block'; result.textContent = 'Setting up your engine… this can take up to a minute.';
+
+  try{
+    const payload = {
+      client_name: '',
+      contact_email,
+      default_language,
+      shop_input,
+      admin_token,
+      tone, niche, seed_keywords, target_audience
+    };
+    const r = await signedPost(submitURL, payload);
+    const data = await readJSON(r);
+    if(!r.ok || data.ok === false) throw new Error(data?.message || data?.raw || r.statusText || 'Submit error');
+
+    const profile = {
+      id: data.client_id || (store.read().id || ''),
+      shop_url: data.shop_url || shop_input,
+      default_blog_id: data.default_blog_id || '',
+      language: default_language,
+      tone, niche, seed_keywords, target_audience,
+      ...(data.sheet_url ? { sheet_url: data.sheet_url } : {})
+    };
+    store.save(profile);
+    if (profile.id) paintClientId(profile.id);
+
+    savedBadge.style.display = 'flex';
+    savedSummary.textContent = `${profile.id || 'cli_…'} · ${profile.shop_url || shop_input} · ${profile.language || default_language}`;
+
+    statusDot.style.background = 'var(--mint)';
+
+    if (Array.isArray(data.blogs_list) && data.blogs_list.length) {
+      const sel = el.blogSelect; sel.innerHTML = '';
+      data.blogs_list.forEach(b=>{
+        const opt = document.createElement('option');
+        opt.value = String(b.id);
+        opt.textContent = b.title || b.handle || ('Blog ' + b.id);
+        sel.appendChild(opt);
+      });
+      if (data.default_blog_id) sel.value = String(data.default_blog_id);
+      el.blogRow.style.display = '';
+    } else if (profile.id || profile.shop_url) {
+      autoFetchBlogs();
+    }
+
+    result.innerHTML = `
+      <strong>${data.message || 'Onboarding created'}</strong><br>
+      Client: <code>${profile.id || '—'}</code><br>
+      Shop: <code>${profile.shop_url}</code><br>
+      Status: <code>${data.status || 'awaiting_activation'}</code><br>
+      Blogs saved: <code>${data.counts?.blogs ?? '—'}</code>
+    `;
+
+    if (data.sheet_url) { openSheetBtn.href = data.sheet_url; engineCard.style.display = ''; }
+
+    const chosenShop = (profile.shop_url || shop_input).toLowerCase();
+    try {
+      const sub = await subscribePlan(chosenShop);
+      if (DEV) console.log('[SEOBoss billing-subscribe:onboard]', sub);
+      paintPlanStatus(chosenShop);
+    } catch {}
+
+    // Unlock after successful onboarding (ADDED)
+    gateSections(true);
+    showInstallCardIfReady();
+
+  }catch(err){
+    result.innerHTML = `<span style="color:#ff9b9b">❌ ${err.message || 'Failed to connect'}</span>`;
+    statusDot.style.background = '#ff8b8b'; statusDot.style.boxShadow = '0 0 10px rgba(255,100,100,.9)';
+  }finally{
+    setBusy(el.onboardBtn,false);
+  }
+ });
 
 })();
 </script>
