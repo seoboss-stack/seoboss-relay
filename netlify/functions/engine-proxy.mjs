@@ -72,6 +72,44 @@ export const handler = async (event) => {
   const ok = secrets.some((s) => verifyWithSecret(url, s));
   if (!ok) return json(401, { error: "bad signature" });
 
+    // ── Admin/Storefront Console UI (served via App Proxy) ──────────────────────
+  if (suffix === "/console") {
+    const shop = (url.searchParams.get("shop") || "").toLowerCase();
+    const clientId = (url.searchParams.get("client_id") || "").trim();
+
+    const html = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>SEOBoss Console</title>
+  <meta http-equiv="Content-Security-Policy"
+        content="frame-ancestors https://*.myshopify.com https://admin.shopify.com https://*.shopify.com;">
+  <style>
+    html,body{margin:0;height:100%;background:#0f1421;color:#e8fff6;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif}
+    #seoboss-console{min-height:100vh}
+  </style>
+</head>
+<body>
+  <div id="seoboss-console"
+       data-client-id="${clientId}"
+       data-shop="${shop}"></div>
+  <script async src="https://seoboss.com/engine/widget.js"></script>
+</body>
+</html>`;
+
+    return {
+      statusCode: 200,
+      headers: {
+        "Content-Type": "text/html; charset=utf-8",
+        "X-Frame-Options": "ALLOWALL",
+        "Cache-Control": "no-store",
+      },
+      body: html,
+    };
+  }
+  // ────────────────────────────────────────────────────────────────────────────
+
   /* ─────────────────────────────────────────────────────────────
      VAULT INTERCEPTOR (failsafe):
      /v3/vault/* → forward internally to Netlify functions
