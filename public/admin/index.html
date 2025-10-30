@@ -237,17 +237,30 @@
       </section>
 
       <!-- PAGE: Engine (inside the same root/panel) -->
-      <section id="tab-engine" hidden>
-        <div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
-            <h3 style="margin:0">SEOBoss — Engine</h3>
-            <small id="engineGuard" style="opacity:.8"></small>
-          </div>
-          <div id="engineMount" style="margin-top:12px">
-            <!-- we’ll inject the admin console here when allowed -->
-          </div>
-        </div>
-      </section>
+<section id="tab-engine" hidden>
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+      <h3 style="margin:0">SEOBoss — Engine</h3>
+      <small id="engineGuard" style="opacity:.8"></small>
+    </div>
+
+    <!-- When wired, this iframe will load your App Proxy route -->
+    <div id="engineMount" style="margin-top:12px">
+      <div id="engineEmpty" style="opacity:.85">
+        Connect first to unlock the console.
+      </div>
+
+      <iframe id="engineFrame"
+              src=""
+              style="display:none;width:100%;min-height:80vh;border:0;border-radius:12px;overflow:hidden"
+              loading="lazy"></iframe>
+
+      <div style="margin-top:10px;display:none" id="engineOpenRow">
+        <a id="engineOpenLink" class="btn outline" target="_blank" rel="noopener">Open in new tab</a>
+      </div>
+    </div>
+  </div>
+</section>
 
     </div><!-- .panel -->
   </div><!-- .wrap -->
@@ -447,42 +460,57 @@
     root.SEO_BOSS._planUI = { planSel, trialInp };
   })(window, rootEl);
 
-  // ===== Install detect & prefill =====
-  let INSTALLED_MODE = false;
-  let SHOP_FROM_URL = '';
-  (()=>{
-    const qs = new URLSearchParams(location.search);
-    SHOP_FROM_URL = (qs.get('shop') || qs.get('shopify') || qs.get('shopify_domain') || '').toLowerCase();
-    INSTALLED_MODE = qs.get('installed') === '1';
+ // ===== Install detect & prefill =====
+let INSTALLED_MODE = false;
+let SHOP_FROM_URL = '';
 
-    const CID_FROM_URL = (qs.get('client_id') || '').trim();
-    if (CID_FROM_URL) { store.save({ ...(store.read()||{}), id: CID_FROM_URL, shop_url: SHOP_FROM_URL || (store.read().shop_url||'') }); paintClientId(CID_FROM_URL); }
-    else { const cached = store.read(); if (cached.id) paintClientId(cached.id); }
+(()=>{
+  const qs = new URLSearchParams(location.search);
+  SHOP_FROM_URL = (qs.get('shop') || qs.get('shopify') || qs.get('shopify_domain') || '').toLowerCase();
+  INSTALLED_MODE = qs.get('installed') === '1';
 
-    if (INSTALLED_MODE) {
-      el.adminToken.required = false;
-      $('#tokenRow').style.display = 'none';
-      el.onboardBtn.textContent = 'Save Preferences';
-      rootEl.querySelector('.head .sub').textContent = 'Connected via the Shopify app — no admin token needed.';
-      // Require Niche in installed flow (guard for unlocking)
-      el.niche.required = true;
+  const CID_FROM_URL = (qs.get('client_id') || '').trim();
+  if (CID_FROM_URL) {
+    const cached = store.read() || {};
+    store.save({ ...cached, id: CID_FROM_URL, shop_url: SHOP_FROM_URL || cached.shop_url || '' });
+    paintClientId(CID_FROM_URL);
+  } else {
+    const cached = store.read() || {};
+    if (cached.id) paintClientId(cached.id);
+  }
 
-      if (!SHOP_FROM_URL) {
-        const cachedShop = (store.read()?.shop_url || '').toLowerCase();
-        if (cachedShop) SHOP_FROM_URL = cachedShop;
-      }
-      if (SHOP_FROM_URL) { el.shopInput.value = SHOP_FROM_URL; el.shopInput.disabled = true; }
+  if (INSTALLED_MODE) {
+    // Embedded: no token, prefill shop, require niche to unlock
+    el.adminToken.required = false;
+    $('#tokenRow').style.display = 'none';
+    el.onboardBtn.textContent = 'Save Preferences';
+    rootEl.querySelector('.head .sub').textContent = 'Connected via the Shopify app — no admin token needed.';
+    el.niche.required = true;
 
-      if (AUTO_DISCOVER_BLOGS && SHOP_FROM_URL) autoFetchBlogs();
-
-      gateSections();           // decide based on cache/inputs
-      showInstallCardIfReady(); // URL wiring; visibility still gated
+    if (!SHOP_FROM_URL) {
+      const cachedShop = (store.read()?.shop_url || '').toLowerCase();
+      if (cachedShop) SHOP_FROM_URL = cachedShop;
     }
-  })();
+    if (SHOP_FROM_URL) {
+      el.shopInput.value = SHOP_FROM_URL;
+      el.shopInput.disabled = true;
+    }
 
-  // After the prefill IIFE ends:
-  if (SHOP_FROM_URL) { try { paintPlanStatus(SHOP_FROM_URL); } catch {} }
-  try { gateSections(); } catch {}
+    if (AUTO_DISCOVER_BLOGS && SHOP_FROM_URL) autoFetchBlogs();
+
+    // Decide visibility and wire URLs
+    gateSections();
+    showInstallCardIfReady();
+
+    // Point Engine tab iframe at /apps/seoboss/console if we have shop+client
+    try { wireEngineTab(); } catch {}
+  }
+})();
+
+// After the prefill IIFE ends:
+if (SHOP_FROM_URL) { try { paintPlanStatus(SHOP_FROM_URL); } catch {} }
+try { gateSections(); } catch {}
+try { wireEngineTab(); } catch {}
 
   // ===== Tabs (simple show/hide) =====
   const tabOnBtn = rootEl.querySelector('#tabOnboardingBtn');
@@ -642,6 +670,48 @@
     copySnippetBtn.textContent = 'Copied!';
     setTimeout(()=> copySnippetBtn.textContent = '📋 Copy embed snippet', 1200);
   });
+
+  // --- Wire Engine tab to App Proxy console (/apps/engine/console) ---
+function wireEngineTab(){
+  const client  = store.read() || {};
+  const shop    = (client.shop_url || SHOP_FROM_URL || '').toLowerCase();
+  const id      = (client.id || '').trim();
+
+  const frame   = document.getElementById('engineFrame');
+  const empty   = document.getElementById('engineEmpty');
+  const openRow = document.getElementById('engineOpenRow');
+  const openLn  = document.getElementById('engineOpenLink');
+
+  if (!frame || !empty) return;
+
+  if (shop && id){
+    // IMPORTANT: your App Proxy subpath is apps/engine
+    const u = `/apps/engine/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
+
+    frame.src = u;
+    frame.style.display = '';
+    empty.style.display = 'none';
+
+    if (openLn && openRow){ openLn.href = u; openRow.style.display = 'block'; }
+
+    const guard = document.getElementById('engineGuard');
+    if (guard) guard.textContent = `shop=${shop} · client=${id.slice(0,6)}…`;
+  } else {
+    frame.removeAttribute('src');
+    frame.style.display = 'none';
+    empty.style.display = '';
+    if (openRow) openRow.style.display = 'none';
+
+    const guard = document.getElementById('engineGuard');
+    if (guard) guard.textContent = 'connect first';
+  }
+}
+
+// Re-wire when the Engine tab is clicked
+document.getElementById('tabEngineBtn')?.addEventListener('click', wireEngineTab);
+
+// Also try once on load (harmless no-op if not ready yet)
+try { wireEngineTab(); } catch {}
 
   // ===== Form submit (Connect or Save Prefs) =====
   $('#bossForm')?.addEventListener('submit', async (e)=>{
