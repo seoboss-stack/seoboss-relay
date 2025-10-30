@@ -1,16 +1,34 @@
 // netlify/functions/shopify-auth.mjs
 import crypto from "node:crypto";
+import { hasInstalledShop, normShop } from "./_lib/_install_state.mjs";
 
 export const handler = async (event) => {
   const u = new URL(event.rawUrl);
-  const shop = (u.searchParams.get("shop") || "").trim();
+  const rawShop = (u.searchParams.get("shop") || "").trim();
+  const host    = u.searchParams.get("host") || "";   // from embedded Admin
 
-  // Basic shop validation
+  // Normalize + validate shop
+  const shop = normShop(rawShop);
   const shopRe = /^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i;
   if (!shopRe.test(shop)) {
     return { statusCode: 400, body: "invalid shop" };
   }
 
+  // ✅ FAST-PATH: already installed? → go straight to your Admin page
+  try {
+    if (await hasInstalledShop(shop)) {
+      const qp = new URLSearchParams({ shop, installed: "1" });
+      if (host) qp.set("host", host);
+      return {
+        statusCode: 302,
+        headers: { Location: `https://hooks.seoboss.com/admin/?${qp.toString()}` },
+      };
+    }
+  } catch {
+    // ignore and continue with OAuth
+  }
+
+  // First-time OAuth
   const APP_URL = process.env.APP_URL || "https://hooks.seoboss.com";
   const API_KEY =
     process.env.SHOPIFY_API_KEY_PUBLIC || process.env.SHOPIFY_API_KEY || "";
