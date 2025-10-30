@@ -23,6 +23,15 @@
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-XSS-Protection = "1; mode=block"
 
+# Allow Shopify Admin to embed ONLY the /admin/* pages
+[[headers]]
+  for = "/admin/*"
+  [headers.values]
+    # Remove/override the global DENY for this path
+    X-Frame-Options = ""
+    # Explicit allowlist for Shopify Admin iframes
+    Content-Security-Policy = "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+
 
 # App Proxy → Job functions
 [[redirects]]
