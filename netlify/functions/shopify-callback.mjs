@@ -341,7 +341,7 @@ try {
     return {
       statusCode: 302,
       headers: {
-        Location: `https://seoboss.com/pages/connect?${qp.toString()}`,
+        Location: `https://hooks.seoboss.com/admin/?${qp.toString()}`,
         // clear any state cookie we might have set
         "Set-Cookie":
           "shopify_oauth_state=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax",
