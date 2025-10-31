@@ -392,11 +392,10 @@
     return d;
   }
 
- async function paintPlanStatus(shop){
+async function paintPlanStatus(shop){
   if (!shop) return;
   try{
-    // use your App Proxy (engine-proxy) route so it works inside Admin
-    const u = `/apps/seoboss/v3/billing/status?shop=${encodeURIComponent(shop)}`;
+    const u = `https://${shop}/apps/seoboss/v3/billing/status`;
     const r = await fetch(u, { headers: { 'Accept':'application/json' }});
     const d = await r.json().catch(()=> ({}));
     if (r.ok && d && d.plan){
@@ -412,6 +411,7 @@
     }
   }catch{/* ignore */}
 }
+
 
   // ===== Endpoints bridge =====
   (function initBridge(root, el){
@@ -668,30 +668,32 @@ try { wireEngineTab(); } catch {}
   const shop   = (client.shop_url || SHOP_FROM_URL || '').toLowerCase();
   const id     = (client.id || '').trim();
 
-  const frame  = document.getElementById('engineFrame');
-  const empty  = document.getElementById('engineEmpty');
-  const openRow= document.getElementById('engineOpenRow');
-  const openLn = document.getElementById('engineOpenLink');
+  const frame   = document.getElementById('engineFrame');
+  const empty   = document.getElementById('engineEmpty');
+  const openRow = document.getElementById('engineOpenRow');
+  const openLn  = document.getElementById('engineOpenLink');
+  const guard   = document.getElementById('engineGuard');
 
   if (!frame || !empty) return;
 
   if (shop && id){
-    // 🔗 Use your Netlify-hosted console shell
-    const u = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
-    frame.src = u;
+    // ✅ Use the SHOP DOMAIN so Shopify signs the request
+    const consoleUrl = `https://${shop}/apps/seoboss/console?client_id=${encodeURIComponent(id)}`;
+
+    frame.src = consoleUrl;
     frame.style.display = '';
     empty.style.display = 'none';
-    if (openLn && openRow){ openLn.href = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`; openRow.style.display = 'block'; }
-    const guard = document.getElementById('engineGuard');
+
+    if (openLn && openRow){ openLn.href = consoleUrl; openRow.style.display = 'block'; }
     if (guard) guard.textContent = `shop=${shop} · client=${id.slice(0,6)}…`;
   } else {
     frame.removeAttribute('src');
     frame.style.display = 'none';
     empty.style.display = '';
-    const guard = document.getElementById('engineGuard');
     if (guard) guard.textContent = 'connect first';
   }
 }
+
 
 // Re-wire when the Engine tab is clicked
 document.getElementById('tabEngineBtn')?.addEventListener('click', wireEngineTab);
