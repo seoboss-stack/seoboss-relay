@@ -671,37 +671,31 @@ try { wireEngineTab(); } catch {}
     setTimeout(()=> copySnippetBtn.textContent = '📋 Copy embed snippet', 1200);
   });
 
-  // --- Wire Engine tab to App Proxy console (/apps/engine/console) ---
-function wireEngineTab(){
-  const client  = store.read() || {};
-  const shop    = (client.shop_url || SHOP_FROM_URL || '').toLowerCase();
-  const id      = (client.id || '').trim();
+ function wireEngineTab(){
+  const client = store.read() || {};
+  const shop   = (client.shop_url || SHOP_FROM_URL || '').toLowerCase();
+  const id     = (client.id || '').trim();
 
-  const frame   = document.getElementById('engineFrame');
-  const empty   = document.getElementById('engineEmpty');
-  const openRow = document.getElementById('engineOpenRow');
-  const openLn  = document.getElementById('engineOpenLink');
+  const frame  = document.getElementById('engineFrame');
+  const empty  = document.getElementById('engineEmpty');
+  const openRow= document.getElementById('engineOpenRow');
+  const openLn = document.getElementById('engineOpenLink');
 
   if (!frame || !empty) return;
 
   if (shop && id){
-    // IMPORTANT: your App Proxy subpath is apps/engine
-    const u = `/apps/engine/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
-
+    // 🔗 Use your Netlify-hosted console shell
+    const u = `https://hooks.seoboss.com/engine/embed.html?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
     frame.src = u;
     frame.style.display = '';
     empty.style.display = 'none';
-
     if (openLn && openRow){ openLn.href = u; openRow.style.display = 'block'; }
-
     const guard = document.getElementById('engineGuard');
     if (guard) guard.textContent = `shop=${shop} · client=${id.slice(0,6)}…`;
   } else {
     frame.removeAttribute('src');
     frame.style.display = 'none';
     empty.style.display = '';
-    if (openRow) openRow.style.display = 'none';
-
     const guard = document.getElementById('engineGuard');
     if (guard) guard.textContent = 'connect first';
   }
