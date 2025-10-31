@@ -403,23 +403,26 @@
     return d;
   }
 
-  async function paintPlanStatus(shop){
-    try{
-      const u = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
-      const d = await r.json().catch(()=>({}));
-      if (d && d.plan) {
-        const badge = document.getElementById('savedSummary');
-        if (badge) {
-          const prev = badge.textContent || '';
-          const parts = prev.split(' · ');
-          if (parts.length) {
-            parts[parts.length - 1] = (parts[parts.length - 1] || '').replace(/\s*\(.*\)\s*$/,'');
-            badge.textContent = parts.join(' · ') + ` · plan=${d.plan}`;
-          }
+ async function paintPlanStatus(shop){
+  if (!shop) return;
+  try{
+    // use your App Proxy (engine-proxy) route so it works inside Admin
+    const u = `/apps/seoboss/v3/billing/status?shop=${encodeURIComponent(shop)}`;
+    const r = await fetch(u, { headers: { 'Accept':'application/json' }});
+    const d = await r.json().catch(()=> ({}));
+    if (r.ok && d && d.plan){
+      const badge = document.getElementById('savedSummary');
+      if (badge){
+        const prev = badge.textContent || '';
+        const parts = prev.split(' · ');
+        if (parts.length){
+          parts[parts.length - 1] = (parts[parts.length - 1] || '').replace(/\s*\(.*\)\s*$/,'');
+          badge.textContent = parts.join(' · ') + ` · plan=${d.plan}`;
         }
       }
-    }catch{}
-  }
+    }
+  }catch{/* ignore */}
+}
 
   // ===== Endpoints bridge =====
   (function initBridge(root, el){
