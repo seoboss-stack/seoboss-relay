@@ -107,7 +107,7 @@ export const handler = async (event) => {
       statusCode: 200,
       headers: {
         "Content-Type": "text/html; charset=utf-8",
-        "X-Frame-Options": "ALLOWALL",
+        "X-Frame-Options": "",
         "Cache-Control": "no-store",
       },
       body: html,
