@@ -88,8 +88,6 @@ export const handler = async (event) => {
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SEOBoss Console</title>
-  <meta http-equiv="Content-Security-Policy"
-        content="frame-ancestors https://*.myshopify.com https://admin.shopify.com https://*.shopify.com;">
   <style>
     html,body{margin:0;height:100%;background:#0f1421;color:#e8fff6;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif}
     #seoboss-console{min-height:100vh}
@@ -99,17 +97,17 @@ export const handler = async (event) => {
   <div id="seoboss-console"
        data-client-id="${clientId}"
        data-shop="${shop}"></div>
-  <script async src="https://hooks.seoboss.com/engine/widget.js"></script>
+  <script type="module" async src="https://hooks.seoboss.com/engine/widget.js"></script>
 </body>
 </html>`;
 
     return {
       statusCode: 200,
       headers: {
-        "Content-Type": "text/html; charset=utf-8",
-        "X-Frame-Options": "",
-        "Cache-Control": "no-store",
-      },
+  "Content-Type": "text/html; charset=utf-8",
+  "Cache-Control": "no-store",
+},
+
       body: html,
     };
   }
