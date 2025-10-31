@@ -677,7 +677,7 @@ try { wireEngineTab(); } catch {}
 
   if (shop && id){
     // 🔗 Use your Netlify-hosted console shell
-    + const u = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
+    const u = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
     frame.src = u;
     frame.style.display = '';
     empty.style.display = 'none';
