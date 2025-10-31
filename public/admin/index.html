@@ -10,13 +10,12 @@
 <script>
   try {
     // window.appBridge is exposed by the UMD bundle
-    const createApp = window.appBridge.createApp;
-    const qs = new URLSearchParams(location.search);
-    const host = qs.get('host') || '';
-    if (host) {
-      window.__SEOBOSS__ = window.__SEOBOSS__ || {};
-      window.__SEOBOSS__.app = createApp({ apiKey: '5654f5c575452aefdca2592d2a2d1f3d', host, forceRedirect: true });
-    }
+    const AB = (window.appBridge && typeof window.appBridge.createApp === 'function') ? window.appBridge : null;
+if (AB && host) {
+  window.__SEOBOSS__ = window.__SEOBOSS__ || {};
+  window.__SEOBOSS__.app = AB.createApp({ apiKey: '...', host, forceRedirect: true });
+}
+
   } catch (e) {
     console.warn('[SEOBoss] App Bridge init skipped:', e);
   }
