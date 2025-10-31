@@ -259,11 +259,14 @@
 (function(){
   const rootEl = document.getElementById('seoboss-onboarding');
 
-  // ===== Config =====
-  const SHARED_SECRET = 'SEOBOSSSECRET_2025'; // must match server PUBLIC_HMAC_KEY
-  const KEY_ID = 'global';
-  const DEV = (rootEl.dataset.devMode || '0') === '1' || new URLSearchParams(location.search).has('dev');
-  const AUTO_DISCOVER_BLOGS = true;
+const SHARED_SECRET = 'SEOBOSSSECRET_2025'; // must match server PUBLIC_HMAC_KEY
+const KEY_ID = 'global';
+const DEV = (rootEl.dataset.devMode || '0') === '1' || new URLSearchParams(location.search).has('dev');
+const AUTO_DISCOVER_BLOGS = true;
+
+// Are we running on a *.myshopify.com origin? (i.e., inside the proxy iframe)
+const IS_SHOP_ORIGIN = /\.myshopify\.com$/i.test(location.hostname);
+
 
   // ===== Helpers =====
   const $ = (s) => rootEl.querySelector(s);
@@ -500,9 +503,10 @@ let SHOP_FROM_URL = '';
 })();
 
 // After the prefill IIFE ends:
-if (SHOP_FROM_URL) { try { paintPlanStatus(SHOP_FROM_URL); } catch {} }
+if (SHOP_FROM_URL && IS_SHOP_ORIGIN) { try { paintPlanStatus(SHOP_FROM_URL); } catch {} }
 try { gateSections(); } catch {}
 try { wireEngineTab(); } catch {}
+
 
   // ===== Tabs (simple show/hide) =====
   const tabOnBtn = rootEl.querySelector('#tabOnboardingBtn');
@@ -625,11 +629,11 @@ try { wireEngineTab(); } catch {}
     if (openConsoleBtn) openConsoleBtn.href = proxyUrl;
 
     const embed = [
-      `<div id="seoboss-console"`,
-      `     data-client-id="${client.id}"`,
-      `     data-shop="${shop}"></div>`,
-      `<script async src="https://hooks.seoboss.com/engine/widget.js"><\/script>`
-    ].join('\n');
+  `<div id="seoboss-console"`,
+  `     data-client-id="${client.id}"`,
+  `     data-shop="${shop}"></div>`,
+  `<script type="module" src="https://hooks.seoboss.com/engine/widget.js"><\/script>`
+].join('\n');
     if (snippetArea) snippetArea.value = embed;
 
     // visibility controlled by gateSections()
