@@ -21,7 +21,7 @@ function getSuffix(url) {
   // Strip any wrapper prefixes so routing works uniformly
   p = p.replace(/^\/\.netlify\/functions\/engine-proxy/, "");
   p = p.replace(/^\/proxy/, "");
-  p = p.replace(/^\/apps\/seoboss/, ""); // ← handle Shopify App Proxy path
+  p = p.replace(/^\/apps\/engine/, ""); // ← handle Shopify App Proxy path
   return p || "/";
 }
 
