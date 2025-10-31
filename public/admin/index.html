@@ -5,33 +5,22 @@
   <meta name="viewport" content="width=device-width,initial-scale=1"/>
   <title>SEOBoss Onboarding</title>
 
-  <!-- App Bridge (optional but recommended for embedded Admin) -->
-  <script type="module">
-    import createApp from 'https://cdn.jsdelivr.net/npm/@shopify/app-bridge@3.7.10/esm/index.js';
-
-    // Read host & shop from Shopify’s embedded URL
-    const qs   = new URLSearchParams(location.search);
+<!-- Optional: Shopify App Bridge UMD (safe to omit) -->
+<script src="https://unpkg.com/@shopify/app-bridge@3.7.10/umd/index.js"></script>
+<script>
+  try {
+    // window.appBridge is exposed by the UMD bundle
+    const createApp = window.appBridge.createApp;
+    const qs = new URLSearchParams(location.search);
     const host = qs.get('host') || '';
-    const shop = (qs.get('shop') || '').toLowerCase();
-    const EMBED_MODE = host ? 'admin' : 'storefront';
-
-    // If you need your app’s API key in the client, inject it at build-time
-    const apiKey = '5654f5c575452aefdca2592d2a2d1f3d' || '';
-
-    let app = null;
-    try {
-      if (host && apiKey) {
-        app = createApp({ apiKey, host, forceRedirect: true });
-      }
-    } catch (e) {
-      console.warn('[SEOBoss] App Bridge failed to init (continuing anyway):', e);
+    if (host) {
+      window.__SEOBOSS__ = window.__SEOBOSS__ || {};
+      window.__SEOBOSS__.app = createApp({ apiKey: '5654f5c575452aefdca2592d2a2d1f3d', host, forceRedirect: true });
     }
-
-    // Make shop available even if App Bridge fails
-    window.__SEOBOSS__ = window.__SEOBOSS__ || {};
-    window.__SEOBOSS__.shop = shop;
-  </script>
-
+  } catch (e) {
+    console.warn('[SEOBoss] App Bridge init skipped:', e);
+  }
+</script>
   <style>
     /* ========== Base UI ========== */
     body{ background:#0f1421; color:#e8fff6; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif; margin:0 }
