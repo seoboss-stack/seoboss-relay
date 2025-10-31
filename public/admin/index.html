@@ -677,11 +677,11 @@ try { wireEngineTab(); } catch {}
 
   if (shop && id){
     // 🔗 Use your Netlify-hosted console shell
-    const u = `https://hooks.seoboss.com/engine/embed.html?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
+    + const u = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
     frame.src = u;
     frame.style.display = '';
     empty.style.display = 'none';
-    if (openLn && openRow){ openLn.href = u; openRow.style.display = 'block'; }
+    if (openLn && openRow){ openLn.href = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`; openRow.style.display = 'block'; }
     const guard = document.getElementById('engineGuard');
     if (guard) guard.textContent = `shop=${shop} · client=${id.slice(0,6)}…`;
   } else {
