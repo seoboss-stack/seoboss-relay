@@ -13,32 +13,48 @@
   SECRETS_SCAN_OMIT_PATHS = "admin/**,public/admin/**"
 
 
-# Allow Shopify Admin to embed ONLY the /admin/* pages
-[[headers]]
-  for = "/admin/*"
-  [headers.values]
-    # Remove/override the global DENY for this path
-    X-Frame-Options = ""
-    # Explicit allowlist for Shopify Admin iframes
-    Content-Security-Policy = "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+########################################
+# Headers
+########################################
 
-[[headers]]
-  for = "/engine/*"
-  [headers.values]
-  X-Frame-Options = "ALLOWALL"
-  Content-Security-Policy = "frame-ancestors https://admin.shopify.com https://*.myshopify.com;"
-  Cache-Control = "public, max-age=31536000"
-
-
-# Enforce HTTPS & basic headers
+# Global security defaults (deny framing by default)
 [[headers]]
   for = "/*"
   [headers.values]
     Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
-    X-Content-Type-Options = "nosniff"
-    X-Frame-Options = "DENY"
-    Referrer-Policy = "strict-origin-when-cross-origin"
-    X-XSS-Protection = "1; mode=block"
+    X-Content-Type-Options    = "nosniff"
+    X-Frame-Options           = "DENY"
+    Referrer-Policy           = "strict-origin-when-cross-origin"
+    X-XSS-Protection          = "1; mode=block"
+
+# Allow Shopify Admin to embed ONLY /admin/* pages (if you serve any there)
+[[headers]]
+  for = "/admin/*"
+  [headers.values]
+    # Clear the global XFO, then allow via CSP frame-ancestors
+    X-Frame-Options = ""
+    Content-Security-Policy = "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+
+# Allow Shopify Admin to embed the engine console shell (HTML)
+# We do NOT cache the HTML, to avoid sticky CSP/markup across deploys
+[[headers]]
+  for = "/engine/embed.html"
+  [headers.values]
+    X-Frame-Options = ""
+    Content-Security-Policy = "frame-ancestors https://admin.shopify.com https://*.myshopify.com"
+    Cache-Control = "no-store"
+
+# Static assets under /engine (safe to cache for a long time)
+[[headers]]
+  for = "/engine/*.js"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
+[[headers]]
+  for = "/engine/*.css"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
+
 
 
 
@@ -155,4 +171,3 @@ force = true
   from = "/admin/*"
   to = "/admin/index.html"
   status = 200
-
