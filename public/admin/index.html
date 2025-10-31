@@ -397,8 +397,11 @@ const IS_SHOP_ORIGIN = /\.myshopify\.com$/i.test(location.hostname);
 
 async function paintPlanStatus(shop){
   if (!shop) return;
+  // Only run if THIS page is on the shop domain (i.e., inside the iframe)
+  if (!/\.myshopify\.com$/i.test(location.hostname)) return;
+
   try{
-    const u = `https://${shop}/apps/engine/v3/billing/status`;
+    const u = `/apps/engine/v3/billing/status`; // same-origin inside iframe
     const r = await fetch(u, { headers: { 'Accept':'application/json' }});
     const d = await r.json().catch(()=> ({}));
     if (r.ok && d && d.plan){
