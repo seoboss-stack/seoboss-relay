@@ -99,7 +99,7 @@ export const handler = async (event) => {
   <div id="seoboss-console"
        data-client-id="${clientId}"
        data-shop="${shop}"></div>
-  <script async src="https://seoboss.com/engine/widget.js"></script>
+  <script async src="https://hooks.seoboss.com/engine/widget.js"></script>
 </body>
 </html>`;
 
