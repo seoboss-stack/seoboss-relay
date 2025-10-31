@@ -18,10 +18,13 @@ function json(status, data) {
 
 function getSuffix(url) {
   let p = url.pathname;
+  // Strip any wrapper prefixes so routing works uniformly
   p = p.replace(/^\/\.netlify\/functions\/engine-proxy/, "");
   p = p.replace(/^\/proxy/, "");
+  p = p.replace(/^\/apps\/seoboss/, ""); // ← handle Shopify App Proxy path
   return p || "/";
 }
+
 
 // Build message per Shopify App Proxy rule (exclude signature, sort keys, join dupes)
 function makeProxyMessage(url) {
@@ -72,59 +75,7 @@ export const handler = async (event) => {
   const ok = secrets.some((s) => verifyWithSecret(url, s));
   if (!ok) return json(401, { error: "bad signature" });
   // 1.5) /apps/seoboss/console → return an HTML shell that mounts your widget
-  if (suffix === "/console") {
-    const clientId = url.searchParams.get("client_id") || "";
-    // prefer signed `shop` from QS; fall back to the one we parsed above
-    const shopParam = (url.searchParams.get("shop") || shop || "").toLowerCase();
 
-    const html = `<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>SEOBoss — Console</title>
-  <style>
-    html,body{height:100%;margin:0;background:#0A0F0D;color:#e8fff6;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif}
-    .wrap{min-height:100%;display:flex;flex-direction:column}
-    header{padding:10px 14px;border-bottom:1px solid rgba(255,255,255,.08)}
-    header b{color:#00f5d4}
-    main{flex:1;display:flex}
-    #seoboss-console{flex:1;min-height:calc(100vh - 60px)}
-    .empty{padding:22px}
-    .muted{opacity:.75}
-  </style>
-</head>
-<body>
-  <div class="wrap">
-    <header>
-      <b>SEOBoss</b> — Engine Console
-      <span class="muted" style="float:right">
-        ${shopParam ? `shop=${shopParam}` : ""}
-        ${clientId ? ` · client=${clientId.slice(0,6)}…` : ""}
-      </span>
-    </header>
-    <main>
-      ${
-        shopParam && clientId
-          ? `<div id="seoboss-console"
-                  data-client-id="${clientId}"
-                  data-shop="${shopParam}"></div>
-             <script src="https://seoboss.com/engine/widget.js" async><\/script>`
-          : `<div class="empty">
-               <p>Missing <code>shop</code> or <code>client_id</code> — please open the console from the app.</p>
-             </div>`
-      }
-    </main>
-  </div>
-</body>
-</html>`;
-
-    return {
-      statusCode: 200,
-      headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
-      body: html,
-    };
-  }
 
     // ── Admin/Storefront Console UI (served via App Proxy) ──────────────────────
   if (suffix === "/console") {
