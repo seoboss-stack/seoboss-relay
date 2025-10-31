@@ -2,6 +2,15 @@
 import crypto from "node:crypto";
 import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
+// Put near the top, after imports
+const ASSET_MAP = {
+  "seoboss-engine.js":
+    "https://cdn.shopify.com/extensions/019a36ae-dbc4-7a9f-9592-6a7a28009252/seoboss-cli-244/assets/seoboss-engine.js",
+  "seoboss-engine.css":
+    "https://cdn.shopify.com/extensions/019a36ae-dbc4-7a9f-9592-6a7a28009252/seoboss-cli-244/assets/seoboss-engine.css",
+};
+
+
 const ORIGIN = "https://admin.shopify.com"; // CORS for n8n-forwarded routes
 
 function json(status, data) {
