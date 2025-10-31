@@ -395,7 +395,7 @@
 async function paintPlanStatus(shop){
   if (!shop) return;
   try{
-    const u = `https://${shop}/apps/seoboss/v3/billing/status`;
+    const u = `https://${shop}/apps/engine/v3/billing/status`;
     const r = await fetch(u, { headers: { 'Accept':'application/json' }});
     const d = await r.json().catch(()=> ({}));
     if (r.ok && d && d.plan){
@@ -621,7 +621,7 @@ try { wireEngineTab(); } catch {}
     const shop = (client.shop_url || '').toLowerCase();
     if (!client.id || !shop) return;
 
-    const proxyUrl = `https://${shop}/apps/seoboss/console?client_id=${encodeURIComponent(client.id)}`;
+    const proxyUrl = `https://${shop}/apps/engine/console?client_id=${encodeURIComponent(client.id)}`;
     if (openConsoleBtn) openConsoleBtn.href = proxyUrl;
 
     const embed = [
@@ -678,7 +678,7 @@ try { wireEngineTab(); } catch {}
 
   if (shop && id){
     // ✅ Use the SHOP DOMAIN so Shopify signs the request
-    const consoleUrl = `https://${shop}/apps/seoboss/console?client_id=${encodeURIComponent(id)}`;
+    const consoleUrl = `https://${shop}/apps/engine/console?client_id=${encodeURIComponent(id)}`;
 
     frame.src = consoleUrl;
     frame.style.display = '';
