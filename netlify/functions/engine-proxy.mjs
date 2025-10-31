@@ -110,7 +110,62 @@ export const handler = async (event) => {
   return { statusCode: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }, body: html };
 }
 
+// ── Tiny loader: /apps/engine/widget.js → injects engine CSS/JS ─────────────
+if (suffix === "/widget.js") {
+  const js = String.raw`(function(){
+    if (window.__SEOBOSS_WIDGET__) return; window.__SEOBOSS_WIDGET__ = true;
 
+    var host = document.getElementById('seoboss-console');
+    if (!host) { console.warn('[SEOBoss] host not found'); return; }
+
+    // ensure mount point for your engine
+    if (!document.getElementById('seoboss-root')) {
+      var root = document.createElement('div');
+      root.id = 'seoboss-root';
+      host.appendChild(root);
+    }
+
+    // persist hints (harmless if unused)
+    try {
+      var cid = host.getAttribute('data-client-id') || '';
+      var shop = host.getAttribute('data-shop') || '';
+      var prev = JSON.parse(localStorage.getItem('seoboss:client') || '{}');
+      localStorage.setItem('seoboss:client', JSON.stringify({ ...prev, id: cid, shop_url: shop }));
+    } catch(e){}
+
+    // endpoints your engine expects through the App Proxy
+    window.CONFIG = window.CONFIG || {};
+    window.CONFIG.endpoints = window.CONFIG.endpoints || {
+      hints:  "/apps/engine/hints",
+      titles: "/apps/engine/blog-titles",
+      post:   "/apps/engine/blog-post",
+      alive:  "/apps/engine/_alive"
+    };
+
+    // load CSS from our asset passthrough
+    var css = document.createElement('link');
+    css.rel = 'stylesheet';
+    css.href = "/apps/engine/assets/seoboss-engine.css";
+    document.head.appendChild(css);
+
+    // then load the engine JS (non-module; your bundle bootstraps itself)
+    var scr = document.createElement('script');
+    scr.src = "/apps/engine/assets/seoboss-engine.js";
+    scr.defer = true;
+    document.head.appendChild(scr);
+  })();`;
+
+  return {
+    statusCode: 200,
+    headers: {
+      "Content-Type": "application/javascript; charset=utf-8",
+      "Cache-Control": "public, max-age=60, s-maxage=60"
+    },
+    body: js
+  };
+}
+
+  
 // ── Asset passthrough: /apps/engine/assets/:file ─────────────────────────────
 if (suffix.startsWith("/assets/")) {
   const file = suffix.replace(/^\/assets\//, "");
