@@ -1,4 +1,1 @@
-/admin/*
-  X-Frame-Options: ALLOWALL
-  Content-Security-Policy: frame-ancestors https://admin.shopify.com https://*.myshopify.com; 
-  Access-Control-Allow-Origin: https://admin.shopify.com
+
