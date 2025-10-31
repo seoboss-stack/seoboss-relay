@@ -2,7 +2,7 @@
 import crypto from "node:crypto";
 import { errlog } from './_lib/_errlog.mjs';  // ✅ ADD THIS
 
-const ORIGIN = "https://seoboss.com"; // CORS for n8n-forwarded routes
+const ORIGIN = "https://admin.shopify.com"; // CORS for n8n-forwarded routes
 
 function json(status, data) {
   return {
