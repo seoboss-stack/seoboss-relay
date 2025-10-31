@@ -1,7 +1,47 @@
 <!doctype html>
-<meta charset="utf-8">
-<title>SEOBoss Embed </title>
-<div id="seoboss-console"
-     data-client-id="cli_demo"
-     data-shop="yourshop.myshopify.com"></div>
-<script async src="/engine/widget.js"></script>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>SEOBoss — Engine Console</title>
+
+  <!-- Styles (served by Netlify from /public/engine) -->
+  <link rel="stylesheet" href="https://hooks.seoboss.com/engine/widget.css" />
+  <style>
+    /* optional: make the console fill viewport nicely when embedded */
+    html,body{margin:0;height:100%;background:#0A0F0D}
+    #seoboss-console{min-height:100vh}
+  </style>
+</head>
+<body>
+  <!-- Console mount -->
+  <div id="seoboss-console" data-shop="" data-client-id=""></div>
+
+  <!-- Prefill data attributes from querystring -->
+  <script>
+    (function () {
+      var qs  = new URLSearchParams(location.search);
+      var el  = document.getElementById('seoboss-console');
+      var shop = (qs.get('shop') || '').toLowerCase();
+      var cid  = (qs.get('client_id') || '').trim();
+
+      if (shop) el.dataset.shop = shop;
+      if (cid)  el.dataset.clientId = cid;
+
+      // Optional: expose a tiny config if your scripts prefer it
+      window.SEOBOSS = {
+        shop: shop,
+        client_id: cid,
+        assets_base: 'https://hooks.seoboss.com/engine'
+      };
+    })();
+  </script>
+
+  <!-- Core + widget (absolute URLs so it works under /apps/proxy too) -->
+  <script src="https://hooks.seoboss.com/engine/engine-core.js" defer></script>
+  <script src="https://hooks.seoboss.com/engine/widget-v2.js" defer></script>
+  <!-- If you ever need the legacy widget as a fallback, uncomment:
+  <script src="https://hooks.seoboss.com/engine/widget.js" defer></script>
+  -->
+</body>
+</html>
