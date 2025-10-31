@@ -405,7 +405,7 @@
 
   async function paintPlanStatus(shop){
     try{
-      const r = await fetch(`https://hooks.seoboss.com/.netlify/functions/billing-status?shop=${encodeURIComponent(shop)}`);
+      const u = `/apps/seoboss/console?shop=${encodeURIComponent(shop)}&client_id=${encodeURIComponent(id)}`;
       const d = await r.json().catch(()=>({}));
       if (d && d.plan) {
         const badge = document.getElementById('savedSummary');
