@@ -87,11 +87,11 @@ export const handler = async (event) => {
 
 
     // ── Admin/Storefront Console UI (served via App Proxy) ──────────────────────
-  if (suffix === "/console") {
-    const shop = (url.searchParams.get("shop") || "").toLowerCase();
-    const clientId = (url.searchParams.get("client_id") || "").trim();
+ if (suffix === "/console") {
+  const shop = (url.searchParams.get("shop") || "").toLowerCase();
+  const clientId = (url.searchParams.get("client_id") || "").trim();
 
-    const html = `<!doctype html>
+  const html = `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8"/>
@@ -103,23 +103,43 @@ export const handler = async (event) => {
   </style>
 </head>
 <body>
-  <div id="seoboss-console"
-       data-client-id="${clientId}"
-       data-shop="${shop}"></div>
-  <script type="module" async src="https://hooks.seoboss.com/engine/widget.js"></script>
+  <div id="seoboss-console" data-client-id="${clientId}" data-shop="${shop}"></div>
+  <script async src="/apps/engine/widget.js"></script>
 </body>
 </html>`;
+  return { statusCode: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }, body: html };
+}
+
+
+// ── Asset passthrough: /apps/engine/assets/:file ─────────────────────────────
+if (suffix.startsWith("/assets/")) {
+  const file = suffix.replace(/^\/assets\//, "");
+  const cdn = ASSET_MAP[file];
+  if (!cdn) return { statusCode: 404, body: "asset not mapped" };
+
+  try {
+    const r = await fetch(cdn, { redirect: "follow" });
+    const body = await r.arrayBuffer();
+    const isCSS = file.endsWith(".css");
+    const isJS  = file.endsWith(".js");
 
     return {
-      statusCode: 200,
+      statusCode: r.status,
       headers: {
-  "Content-Type": "text/html; charset=utf-8",
-  "Cache-Control": "no-store",
-},
-
-      body: html,
+        "Content-Type": isCSS ? "text/css; charset=utf-8"
+                    : isJS  ? "application/javascript; charset=utf-8"
+                            : (r.headers.get("content-type") || "application/octet-stream"),
+        "Cache-Control": "public, max-age=300, s-maxage=300", // short cache to pick up new CLI pushes
+        "Access-Control-Allow-Origin": "*", // harmless; request is same-origin anyway
+      },
+      body: Buffer.from(body).toString("base64"),
+      isBase64Encoded: true,
     };
+  } catch (e) {
+    return { statusCode: 502, body: "upstream asset fetch failed" };
   }
+}
+  
   // ────────────────────────────────────────────────────────────────────────────
 
   /* ─────────────────────────────────────────────────────────────
