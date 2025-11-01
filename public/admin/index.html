@@ -14,7 +14,7 @@
       const host = new URLSearchParams(location.search).get('host') || '';
       if (AB && host) {
         window.__SEOBOSS__ = window.__SEOBOSS__ || {};
-        window.__SEOBOSS__.app = AB.createApp({ apiKey: '...', host, forceRedirect: true });
+        window.__SEOBOSS__.app = AB.createApp({ apiKey: '5654f5c575452aefdca2592d2a2d1f3d', host, forceRedirect: true });
       }
     } catch (e) {
       console.warn('[SEOBoss] App Bridge init skipped:', e);
@@ -276,6 +276,27 @@
       </div><!-- .panel -->
     </div><!-- .wrap -->
   </div><!-- #seoboss-onboarding -->
+ <script>
+  // === Multi-tenant key helpers (ADD ONCE) ===
+  function currentShopFromURL(){
+    const qs = new URLSearchParams(location.search);
+    return (qs.get('shop') || qs.get('shopify') || qs.get('shopify_domain') || '').toLowerCase().trim();
+  }
+  function normalizeShop(s){ return (s||'').toLowerCase().trim(); }
+  function _legacyClient(){ try{ return JSON.parse(localStorage.getItem('seoboss:client')||'{}'); }catch{ return {}; } }
+  function getClientKey(){
+    const fromUrl = currentShopFromURL();
+    const fallback = _legacyClient().shop_url || '';
+    const shop = normalizeShop(fromUrl || fallback);
+    return shop ? `seoboss:client:${shop}` : 'seoboss:client:__unknown__';
+  }
+  function getPlanKey(){
+    const fromUrl = currentShopFromURL();
+    const fallback = _legacyClient().shop_url || '';
+    const shop = normalizeShop(fromUrl || fallback);
+    return shop ? `seoboss:plan:${shop}` : 'seoboss:plan:__unknown__';
+  }
+  </script>
 
   <script>
     (function(){
@@ -385,11 +406,30 @@
         return v ? v : undefined;
       }
 
-      // local cache
-      const store = {
-        save(c){ try{ localStorage.setItem('seoboss:client', JSON.stringify(c)); }catch{} },
-        read(){ try{ return JSON.parse(localStorage.getItem('seoboss:client')||'{}'); }catch{ return {}; } }
-      };
+   // local cache  (REPLACES old store block)
+function isUnknownKey(k){ return /__unknown__$/.test(k); }
+
+const store = {
+  save(c){
+    try{
+      const k = getClientKey();
+      if (isUnknownKey(k)) return; // don't write if we don't know the shop
+      localStorage.setItem(k, JSON.stringify(c));
+    }catch{}
+  },
+  read(){
+    try{
+      const k = getClientKey();
+      const v = localStorage.getItem(k);
+      if (v) return JSON.parse(v);
+  
+      const legacy = localStorage.getItem('seoboss:client');
+      return legacy ? JSON.parse(legacy) : {};
+    }catch{ return {}; }
+  }
+};
+
+
 
       function paintClientId(id){
         if(!id) return;
@@ -430,7 +470,7 @@
 
         const payload = { shop, plan };
         if (plan === 'trial') payload.trial_days = trialDays;
-        try { localStorage.setItem('seoboss:plan', plan); } catch {}
+        try { localStorage.setItem(getPlanKey(), plan); } catch {}
 
         const r = await fetch(url, {
           method: 'POST',
@@ -487,7 +527,7 @@
         // Plan defaults from URL / cache
         const qs = new URLSearchParams(location.search);
         const showPlan = qs.get('show_plan') === '1';
-        const defaultPlan = (qs.get('plan') || localStorage.getItem('seoboss:plan') || 'pro').toLowerCase();
+        const defaultPlan = (qs.get('plan') || localStorage.getItem(getPlanKey()) || 'pro').toLowerCase();
         const defaultTrialDays = Number(qs.get('trial_days') || '') || 3;
 
         const planRow = el.querySelector('#planRow');
@@ -514,7 +554,11 @@
         const CID_FROM_URL = (qs.get('client_id') || '').trim();
         if (CID_FROM_URL) {
           const cached = store.read() || {};
-          store.save({ ...cached, id: CID_FROM_URL, shop_url: SHOP_FROM_URL || cached.shop_url || '' });
+          store.save({ 
+  ...cached, 
+  id: CID_FROM_URL, 
+  ...(SHOP_FROM_URL ? { shop_url: SHOP_FROM_URL } : {}) 
+});
           paintClientId(CID_FROM_URL);
         } else {
           const cached = store.read() || {};
@@ -616,7 +660,7 @@
         importPreview.innerHTML = '';
         setBusy(importBtn, true, 'Importing…');
         try{
-          const r = await signedPost(url, { client_id: client.id });
+          const r = await signedPost(url, { client_id: client.id, shop: (client.shop_url || '').toLowerCase() });
           const d = await readJSON(r);
           if(!r.ok || d.ok === false) throw new Error(d?.message || d?.raw || ('HTTP '+r.status));
 
@@ -699,13 +743,20 @@
         }
       });
 
-      copySnippetBtn?.addEventListener('click', ()=>{
-        if (!snippetArea) return;
-        snippetArea.select();
-        document.execCommand('copy');
-        copySnippetBtn.textContent = 'Copied!';
-        setTimeout(()=> copySnippetBtn.textContent = '📋 Copy embed snippet', 1200);
-      });
+      copySnippetBtn?.addEventListener('click', async ()=>{
+  if (!snippetArea) return;
+  try {
+    await navigator.clipboard.writeText(snippetArea.value);
+    copySnippetBtn.textContent = 'Copied!';
+  } catch {
+    // Fallback for older browsers / restricted iframes
+    snippetArea.select();
+    document.execCommand('copy');
+    copySnippetBtn.textContent = 'Copied!';
+  }
+  setTimeout(()=> copySnippetBtn.textContent = '📋 Copy embed snippet', 1200);
+});
+
 
       function wireEngineTab(){
         const client = store.read() || {};
