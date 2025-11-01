@@ -11,7 +11,7 @@ const ASSET_MAP = {
 };
 
 
-const ORIGIN = "https://admin.shopify.com"; // CORS for n8n-forwarded routes
+const ORIGIN = "*"; // CORS for n8n-forwarded routes
 
 function json(status, data) {
   return {
@@ -145,22 +145,37 @@ if (suffix === "/widget.js") {
       host.appendChild(root);
     }
 
-    // persist hints (harmless if unused)
+    // --- Persist tenant to BOTH legacy and per-shop keys ---
+    var cid  = host.getAttribute('data-client-id') || '';
+    var shop = (host.getAttribute('data-shop') || '').toLowerCase();
     try {
-      var cid = host.getAttribute('data-client-id') || '';
-      var shop = host.getAttribute('data-shop') || '';
-      var prev = JSON.parse(localStorage.getItem('seoboss:client') || '{}');
-      localStorage.setItem('seoboss:client', JSON.stringify({ ...prev, id: cid, shop_url: shop }));
+      var prev = {};
+      try { prev = JSON.parse(localStorage.getItem('seoboss:client') || '{}'); } catch(_){}
+      var merged = Object.assign({}, prev, { id: cid, shop_url: shop });
+
+      // legacy
+      localStorage.setItem('seoboss:client', JSON.stringify(merged));
+      // per-shop (what the onboarding page reads)
+      var nsKey = shop ? ('seoboss:client:' + shop) : 'seoboss:client:__unknown__';
+      if (!/__unknown__$/.test(nsKey)) localStorage.setItem(nsKey, JSON.stringify(merged));
     } catch(e){}
 
-    // endpoints your engine expects through the App Proxy
+    // --- Endpoints via App Proxy with client_id & shop in QS ---
     window.CONFIG = window.CONFIG || {};
-    window.CONFIG.endpoints = window.CONFIG.endpoints || {
-      hints:  "/apps/engine/hints",
-      titles: "/apps/engine/blog-titles",
-      post:   "/apps/engine/blog-post",
-      alive:  "/apps/engine/_alive"
-    };
+    (function(){
+      var q = '?client_id=' + encodeURIComponent(cid) + (shop ? ('&shop=' + encodeURIComponent(shop)) : '');
+      window.CONFIG.endpoints = window.CONFIG.endpoints || {
+        hints:        "/apps/engine/hints"        + q,
+        titles:       "/apps/engine/blog-titles"  + q,
+        post:         "/apps/engine/blog-post"    + q,
+        alive:        "/apps/engine/_alive"       + q,
+        // Optional: direct vault endpoints if your engine calls them
+        vaultList:    "/apps/engine/v3/vault/list"    + q,
+        vaultAdd:     "/apps/engine/v3/vault/add"     + q,
+        vaultUpdate:  "/apps/engine/v3/vault/update"  + q,
+        vaultDelete:  "/apps/engine/v3/vault/delete"  + q
+      };
+    })();
 
     // load CSS from our asset passthrough
     var css = document.createElement('link');
@@ -173,6 +188,21 @@ if (suffix === "/widget.js") {
     scr.src = "/apps/engine/assets/seoboss-engine.js";
     scr.defer = true;
     document.head.appendChild(scr);
+
+    // --- Height sync for parents embedding this console (e.g., onboarding iframe) ---
+    function postHeight(){
+      try{
+        var h = document.documentElement.scrollHeight || document.body.scrollHeight || 0;
+        if (h) parent.postMessage({ type: 'seoboss:height', height: h }, '*');
+      }catch(e){}
+    }
+    try{
+      var ro = new ResizeObserver(postHeight);
+      ro.observe(document.documentElement);
+    }catch(e){
+      setInterval(postHeight, 800);
+    }
+    window.addEventListener('load', postHeight);
   })();`;
 
   return {
@@ -185,36 +215,6 @@ if (suffix === "/widget.js") {
   };
 }
 
-  
-// ── Asset passthrough: /apps/engine/assets/:file ─────────────────────────────
-if (suffix.startsWith("/assets/")) {
-  const file = suffix.replace(/^\/assets\//, "");
-  const cdn = ASSET_MAP[file];
-  if (!cdn) return { statusCode: 404, body: "asset not mapped" };
-
-  try {
-    const r = await fetch(cdn, { redirect: "follow" });
-    const body = await r.arrayBuffer();
-    const isCSS = file.endsWith(".css");
-    const isJS  = file.endsWith(".js");
-
-    return {
-      statusCode: r.status,
-      headers: {
-        "Content-Type": isCSS ? "text/css; charset=utf-8"
-                    : isJS  ? "application/javascript; charset=utf-8"
-                            : (r.headers.get("content-type") || "application/octet-stream"),
-        "Cache-Control": "public, max-age=300, s-maxage=300", // short cache to pick up new CLI pushes
-        "Access-Control-Allow-Origin": "*", // harmless; request is same-origin anyway
-      },
-      body: Buffer.from(body).toString("base64"),
-      isBase64Encoded: true,
-    };
-  } catch (e) {
-    return { statusCode: 502, body: "upstream asset fetch failed" };
-  }
-}
-  
   // ────────────────────────────────────────────────────────────────────────────
 
   /* ─────────────────────────────────────────────────────────────
