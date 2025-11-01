@@ -61,11 +61,43 @@ if (AB && host) {
     #seoboss-onboarding [hidden]{ display:none !important; }
 
     @media (max-width:820px){ .row.two{ grid-template-columns:1fr } .wrap{ padding:1rem } }
+
+    
   </style>
  <style>
   /* Only affect Engine tab */
   #tab-engine:not([hidden]) .card { background:transparent; box-shadow:none; padding:0; }
   #engineMount { margin:0; }
+/* Full-bleed canvas only while Engine tab is shown */
+body.seoboss-embed #tab-engine .card {
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
+body.seoboss-embed #seoboss-onboarding .wrap,
+body.seoboss-embed #seoboss-onboarding .panel {
+  max-width: none !important;
+  width: 100% !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border-radius: 0 !important;
+}
+
+body.seoboss-embed #engineMount { margin: 0 !important; }
+
+/* iframe visible and allowed to expand */
+#engineFrame {
+  display: block;      /* make sure it's not hidden */
+  width: 100% !important;
+  min-height: 100vh;   /* safe floor until JS resizes */
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+}
 
   /* The iframe should NOT have vh; we’ll set exact px via postMessage */
  #engineFrame {
