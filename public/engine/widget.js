@@ -1,13 +1,12 @@
-<!-- /engine/widget.js -->
-<script>
+// /engine/widget.js  (no <script> wrapper)
 (() => {
   if (window.__SEOBOSS_WIDGET__) return;
   window.__SEOBOSS_WIDGET__ = true;
 
   const host = document.getElementById('seoboss-console');
-  if (!host) return console.warn('[SEOBoss] host <div id="seoboss-console"> not found');
+  if (!host) return console.warn('[SEOBoss] <div id="seoboss-console"> not found');
 
-  // Inner mount
+  // Ensure inner mount
   let root = document.getElementById('seoboss-root');
   if (!root) {
     root = document.createElement('div');
@@ -15,13 +14,13 @@
     host.appendChild(root);
   }
 
-  /* ---------- Minimal CSS to avoid inner scroll/boxing ---------- */
+  /* ---------- CSS: kill inner scroll/boxing ---------- */
   (function injectCss(){
     const s = document.createElement('style');
     s.textContent = `
       html, body { margin:0 !important; background:transparent !important; }
-      #seoboss-console, #seoboss-root { display:block; min-height:100vh; }
-      /* If any container in the engine sets fixed heights, neutralize */
+      #seoboss-console, #seoboss-root { display:block; width:100%; min-height:100vh; }
+      /* Neutralize any fixed-height shells inside the engine */
       #seoboss-root .app-shell, #seoboss-root .engine-shell {
         height:auto !important; min-height:100vh !important; overflow:visible !important;
       }
@@ -46,48 +45,45 @@
     alive:  "/apps/engine/_alive"
   };
 
-  // Load engine CSS/JS (use your preferred host)
+  // Load engine CSS/JS (cache-busted)
   const CSS_URL = "/apps/engine/assets/seoboss-engine.css";
   const JS_URL  = "/apps/engine/assets/seoboss-engine.js";
+  const bust    = `?v=${Date.now()}`;
 
   const link = document.createElement('link');
   link.rel = 'stylesheet';
-  link.href = CSS_URL;
+  link.href = CSS_URL + bust;
   document.head.appendChild(link);
 
   const scr = document.createElement('script');
-  scr.src = JS_URL;
+  scr.src = JS_URL + bust;
   scr.defer = true;
   document.head.appendChild(scr);
 
-  /* ---------- Robust height reporter to parent ---------- */
-  function postHeight() {
+  /* ---------- Height → parent (must match admin listener) ---------- */
+  const sendHeight = () => {
     const h = Math.max(
       document.documentElement.scrollHeight,
       document.body.scrollHeight,
       document.documentElement.offsetHeight,
       document.body.offsetHeight
     );
-    parent.postMessage({ type: 'SEOBOSS_IFRAME_HEIGHT', height: h }, '*');
-  }
+    // MUST match the parent listener type:
+    parent.postMessage({ type: 'seoboss:height', height: h }, '*');
+  };
 
-  const report = () => requestAnimationFrame(postHeight);
+  const schedule = () => requestAnimationFrame(sendHeight);
 
-  window.addEventListener('load', report);
-  window.addEventListener('resize', report);
-  if (document.fonts?.ready) document.fonts.ready.then(report).catch(()=>{});
+  window.addEventListener('load', schedule);
+  window.addEventListener('resize', schedule);
+  if (document.fonts?.ready) document.fonts.ready.then(schedule).catch(()=>{});
 
-  // Watch layout changes (content expanding)
   if ('ResizeObserver' in window) {
-    new ResizeObserver(report).observe(document.body);
+    new ResizeObserver(schedule).observe(document.body);
   }
   if ('MutationObserver' in window) {
-    new MutationObserver(report).observe(document.body, { childList:true, subtree:true, attributes:true });
+    new MutationObserver(schedule).observe(document.body, { childList:true, subtree:true, attributes:true });
   }
-  // Gentle heartbeat for any missed cases
-  setInterval(report, 1200);
-
-  // Let parent know we’re alive right away
-  postHeight();
+  setInterval(schedule, 1200); // gentle heartbeat
+  sendHeight(); // initial ping
 })();
-</script>
