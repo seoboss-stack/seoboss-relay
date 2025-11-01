@@ -59,35 +59,29 @@ if (AB && host) {
 
     @media (max-width:820px){ .row.two{ grid-template-columns:1fr } .wrap{ padding:1rem } }
   </style>
-  <style> /* When the Engine tab is visible, make the canvas full-bleed */ #tab-engine:not([hidden]) .card { background: transparent; box-shadow: none; padding: 0; } #tab-engine:not([hidden]) #engineMount { margin: 0; } #tab-engine:not([hidden]) iframe#engineFrame { display:block; width:100%; height:100vh; /* initial height: App Bridge will keep resizing */ min-height:100vh; border:0; border-radius:0; /* lose the rounded card feel */ overflow:hidden; } /* Optionally let the whole page go edge-to-edge on Engine tab */ #tab-engine:not([hidden]) ~ .wrap, #tab-engine:not([hidden]) .wrap { max-width:none; padding:0; } /* If your outer .panel adds the glow frame, neutralize it on engine tab */ #tab-engine:not([hidden]) ~ .panel, #tab-engine:not([hidden]) .panel { background: transparent; box-shadow: none; margin:0; padding:0; border-radius:0; } </style>
-  <style>
-  /* Full-bleed look while the Engine tab is active */
+ <style>
+  /* Only affect Engine tab */
+  #tab-engine:not([hidden]) .card { background:transparent; box-shadow:none; padding:0; }
+  #engineMount { margin:0; }
+
+  /* The iframe should NOT have vh; we’ll set exact px via postMessage */
+  #engineFrame {
+    display:none;
+    width:100%;
+    border:0;
+    border-radius:0;
+    overflow:hidden;
+  }
+
+  /* When Engine tab active, let the canvas go edge-to-edge */
   body.seoboss-embed #seoboss-onboarding .wrap,
   body.seoboss-embed #seoboss-onboarding .panel {
-    max-width: none !important;
-    margin: 0 !important;
-    padding: 0 !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    border-radius: 0 !important;
-  }
-
-  body.seoboss-embed #engineMount { margin: 0 !important; }
-
-  body.seoboss-embed #engineFrame {
-    display: block !important;
-    width: 100% !important;
-    height: 100vh;
-    min-height: 100vh;
-    border: 0 !important;
-    border-radius: 0 !important;
-    overflow: hidden !important;
-  }
-
-  body.seoboss-embed #tab-engine .card {
-    background: transparent !important;
-    box-shadow: none !important;
-    padding: 0 !important;
+    max-width:none !important;
+    margin:0 !important;
+    padding:0 !important;
+    background:transparent !important;
+    box-shadow:none !important;
+    border-radius:0 !important;
   }
 </style>
 
@@ -272,10 +266,10 @@ if (AB && host) {
         Connect first to unlock the console.
       </div>
 
-      <iframe id="engineFrame"
-              src=""
-              style="display:none;width:100%;min-height:80vh;border:0;border-radius:12px;overflow:hidden"
-              loading="lazy"></iframe>
+     <iframe id="engineFrame"
+        src=""
+        style="display:none;width:100%;border:0;border-radius:0;overflow:hidden"
+        loading="lazy"></iframe>
 
       <div style="margin-top:10px;display:none" id="engineOpenRow">
         <a id="engineOpenLink" class="btn outline" target="_blank" rel="noopener">Open in new tab</a>
@@ -942,5 +936,30 @@ try { wireEngineTab(); } catch {}
 
 })();
 </script>
+  <script>
+(function(){
+  const frame = document.getElementById('engineFrame');
+  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
+
+  // Resize from child
+  window.addEventListener('message', (e) => {
+    const d = e?.data;
+    if (!d || d.type !== 'SEOBOSS_IFRAME_HEIGHT') return;
+    const px = clamp(Number(d.height || 0) + 24, 400, 30000); // small buffer
+    frame.style.height = px + 'px';
+  }, false);
+
+  // Toggle full-bleed chrome when Engine tab visible
+  const tabOnBtn = document.getElementById('tabOnboardingBtn');
+  const tabEnBtn = document.getElementById('tabEngineBtn');
+  const selectTab = (which) => {
+    const isOn = which === 'onboarding';
+    document.body.classList.toggle('seoboss-embed', !isOn);
+  };
+  tabOnBtn?.addEventListener('click', () => selectTab('onboarding'));
+  tabEnBtn?.addEventListener('click', () => selectTab('engine'));
+})();
+</script>
+
 </body>
 </html>
