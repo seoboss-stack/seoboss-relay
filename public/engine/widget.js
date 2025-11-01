@@ -1,4 +1,4 @@
-<!-- /engine/widget.js (served from hooks.seoboss.com) -->
+<!-- /engine/widget.js (served by /apps/engine/widget.js) -->
 <script>
 (() => {
   if (window.__SEOBOSS_WIDGET__) return;
@@ -14,44 +14,73 @@
     host.appendChild(root);
   }
 
-  // ---- Namespaced cache (per shop) + no-blank writes ----
-  const clientId = (host.getAttribute('data-client-id') || '').trim();
-  const shop     = (host.getAttribute('data-shop') || '').trim().toLowerCase();
-  const keyFor   = s => `seoboss:client:${(s||'').toLowerCase()}`;
+  // ---------- Resolve tenant (from data-attrs, QS fallback, then cache) ----------
+  const qs = new URLSearchParams(location.search);
+  let clientId = (host.getAttribute('data-client-id') || qs.get('client_id') || '').trim();
+  let shop     = (host.getAttribute('data-shop') || qs.get('shop') || '').trim().toLowerCase();
 
-  // Migrate legacy global once (read-only)
+  const perShopKey = s => `seoboss:client:${(s||'').toLowerCase()}`;
+
+  // Migrate legacy global cache → namespaced
   try {
     const legacy = localStorage.getItem('seoboss:client');
     if (legacy) {
       const parsed = JSON.parse(legacy || '{}');
-      const legacyShop = (parsed.shop_url || '').toLowerCase();
-      if (legacyShop && !localStorage.getItem(keyFor(legacyShop))) {
-        localStorage.setItem(keyFor(legacyShop), JSON.stringify(parsed));
+      const lshop = (parsed.shop_url || '').toLowerCase();
+      if (lshop && !localStorage.getItem(perShopKey(lshop))) {
+        localStorage.setItem(perShopKey(lshop), JSON.stringify(parsed));
       }
     }
   } catch {}
 
-  // Only persist if BOTH values are present; don’t clobber an existing good cache
+  // If attrs/QS missing, try cache
+  try {
+    if ((!clientId || !shop) && shop) {
+      const cached = JSON.parse(localStorage.getItem(perShopKey(shop)) || '{}');
+      clientId = clientId || cached.id || '';
+      shop     = shop     || cached.shop_url || shop;
+    }
+  } catch {}
+
+  // Persist (don’t clobber a good cache)
   try {
     if (clientId && shop) {
-      const k = keyFor(shop);
-      const existing = JSON.parse(localStorage.getItem(k) || '{}');
-      if (!existing.id || !existing.shop_url) {
-        localStorage.setItem(k, JSON.stringify({ ...existing, id: clientId, shop_url: shop }));
-      }
+      const k = perShopKey(shop);
+      const ex = JSON.parse(localStorage.getItem(k) || '{}');
+      if (!ex.id || !ex.shop_url) localStorage.setItem(k, JSON.stringify({ ...ex, id: clientId, shop_url: shop }));
+      // keep legacy updated too (harmless)
+      localStorage.setItem('seoboss:client', JSON.stringify({ id: clientId, shop_url: shop }));
     }
   } catch {}
 
-  // ---- Endpoints (won’t overwrite if already set elsewhere) ----
+  // ---------- Endpoints (append ?client_id=&shop= to ALL) ----------
   window.CONFIG = window.CONFIG || {};
-  window.CONFIG.endpoints = window.CONFIG.endpoints || {
-    hints:  "/apps/engine/hints",
-    titles: "/apps/engine/blog-titles",
-    post:   "/apps/engine/blog-post",
-    alive:  "/apps/engine/_alive"
-  };
+  (function(){
+    const q = `?client_id=${encodeURIComponent(clientId||'')}` + (shop ? `&shop=${encodeURIComponent(shop)}` : '');
+    window.CONFIG.endpoints = window.CONFIG.endpoints || {
+      // content
+      hints:          "/apps/engine/hints"             + q,
+      titles:         "/apps/engine/blog-titles"       + q,
+      post:           "/apps/engine/blog-post"         + q,
+      alive:          "/apps/engine/_alive"            + q,
 
-  // ---- Assets (your exact Shopify CDN URLs) ----
+      // vault
+      vaultList:      "/apps/engine/v3/vault/list"     + q,
+      vaultAdd:       "/apps/engine/v3/vault/add"      + q,
+      vaultUpdate:    "/apps/engine/v3/vault/update"   + q,
+      vaultDelete:    "/apps/engine/v3/vault/delete"   + q,
+
+      // billing / usage / jobs  🔧 these were missing before
+      billingStatus:  "/apps/engine/v3/billing/status"    + q,
+      billingAllow:   "/apps/engine/v3/billing/allow"     + q,
+      billingSubscribe:"/apps/engine/v3/billing/subscribe"+ q,
+      usageMark:      "/apps/engine/v3/usage/mark"        + q,
+      jobStart:       "/apps/engine/v3/job/start"         + q,
+      jobResult:      "/apps/engine/v3/job/result"        + q
+    };
+  })();
+
+  // ---------- Assets (your Shopify CDN bundle) ----------
   const CSS_URL = "https://cdn.shopify.com/extensions/019a36ae-dbc4-7a9f-9592-6a7a28009252/seoboss-cli-244/assets/seoboss-engine.css";
   const JS_URL  = "https://cdn.shopify.com/extensions/019a36ae-dbc4-7a9f-9592-6a7a28009252/seoboss-cli-244/assets/seoboss-engine.js";
 
@@ -67,7 +96,7 @@
   scr.onerror = () => console.warn('[SEOBoss] JS failed to load:', JS_URL);
   document.head.appendChild(scr);
 
-  // ---- Optional: report height to parent (fixes short iframe on Onboarding page) ----
+  // ---------- (Optional) iframe height sync for embedded contexts ----------
   const inIFrame = (() => { try { return window.parent && window.parent !== window; } catch { return false; }})();
   function postHeight(){
     if (!inIFrame) return;
@@ -78,10 +107,12 @@
       document.body.offsetHeight,
       window.innerHeight || 0
     );
-    try { window.parent.postMessage({ type:'seoboss:height', height: Math.max(600, h) }, '*'); } catch {}
+    try { window.parent.postMessage({ type:'seoboss:height', height: Math.max(700, h) }, '*'); } catch {}
   }
   window.addEventListener('load', postHeight);
   document.addEventListener('DOMContentLoaded', postHeight);
   window.addEventListener('resize', postHeight);
+
+  console.log('[SEOBoss] widget mounted', { shop, clientId });
 })();
 </script>
