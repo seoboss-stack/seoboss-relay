@@ -111,26 +111,20 @@ export const handler = async (event) => {
 
       const app = AB.createApp({ apiKey: '5654f5c575452aefdca2592d2a2d1f3d', host, forceRedirect: true });
       const { actions } = AB;
-      const size = actions.Size.create(app);
+     const fullscreen = actions.Fullscreen.create(app);
+    fullscreen.dispatch(actions.Fullscreen.Action.ENTER);
 
-      const sync = () =>
-        size.dispatch(actions.Size.Action.RESIZE, {
-          height: Math.max(
-            document.documentElement.scrollHeight,
-            document.body.scrollHeight,
-            640 // floor
-          )
-        });
-
-      window.addEventListener('load', sync);
-      new ResizeObserver(sync).observe(document.body);
-      // also catch route / DOM changes in your engine
-      document.addEventListener('SEOBOSS:content-changed', sync);
-    } catch (e) {
-      console.warn('[SEOBoss] resize skipped:', e);
-    }
-  })();
-  </script>
+    // keep your resizer too (it complements fullscreen on long pages)
+    const size = actions.Size.create(app);
+    const sync = () => size.dispatch(actions.Size.Action.RESIZE, {
+      height: Math.max(document.documentElement.scrollHeight, document.body.scrollHeight, 720)
+    });
+    window.addEventListener('load', sync);
+    new ResizeObserver(sync).observe(document.body);
+    document.addEventListener('SEOBOSS:content-changed', sync);
+  } catch(e) { console.warn('[SEOBoss] fullscreen/resize skipped:', e); }
+})();
+</script>
 </body>
 </html>`;
   return { statusCode: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }, body: html };
