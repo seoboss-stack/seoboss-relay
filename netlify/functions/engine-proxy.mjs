@@ -215,6 +215,35 @@ if (suffix === "/widget.js") {
   };
 }
 
+  // ── Asset passthrough: /apps/engine/assets/:file ─────────────────────────────
+if (suffix.startsWith("/assets/")) {
+  const file = suffix.replace(/^\/assets\//, "");
+  const cdn = ASSET_MAP[file];
+  if (!cdn) return { statusCode: 404, body: "asset not mapped" };
+
+  try {
+    const r = await fetch(cdn, { redirect: "follow" });
+    const body = await r.arrayBuffer();
+    const isCSS = file.endsWith(".css");
+    const isJS  = file.endsWith(".js");
+
+    return {
+      statusCode: r.status,
+      headers: {
+        "Content-Type": isCSS ? "text/css; charset=utf-8"
+                    : isJS  ? "application/javascript; charset=utf-8"
+                            : (r.headers.get("content-type") || "application/octet-stream"),
+        "Cache-Control": "public, max-age=300, s-maxage=300",
+        "Access-Control-Allow-Origin": "*",
+      },
+      body: Buffer.from(body).toString("base64"),
+      isBase64Encoded: true,
+    };
+  } catch (e) {
+    return { statusCode: 502, body: "upstream asset fetch failed" };
+  }
+}
+
   // ────────────────────────────────────────────────────────────────────────────
 
   /* ─────────────────────────────────────────────────────────────
