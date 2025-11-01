@@ -772,6 +772,21 @@ document.getElementById('tabEngineBtn')?.addEventListener('click', wireEngineTab
 // Also try once on load (harmless no-op if not ready yet)
 try { wireEngineTab(); } catch {}
 
+  /* === NEW: listen for height messages from the child console (widget.js) === */
+window.addEventListener('message', (e) => {
+  const d = e && e.data;
+  if (!d || d.type !== 'seoboss:height') return;
+
+  const frame = document.getElementById('engineFrame');
+  if (!frame) return;
+
+  const h = Number(d.height) || 0;
+  if (h > 0) {
+    const floor = Math.max(600, window.innerHeight); // keep a comfy minimum
+    frame.style.height = Math.max(h, floor) + 'px';
+  }
+});
+
   // ===== Form submit (Connect or Save Prefs) =====
   $('#bossForm')?.addEventListener('submit', async (e)=>{
     e.preventDefault();
