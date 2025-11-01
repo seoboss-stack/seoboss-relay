@@ -109,7 +109,7 @@ export const handler = async (event) => {
       const AB = window.appBridge;
       if (!AB || !AB.createApp || !host) return;
 
-      const app = AB.createApp({ apiKey: 'YOUR_PUBLIC_API_KEY', host, forceRedirect: true });
+      const app = AB.createApp({ apiKey: '5654f5c575452aefdca2592d2a2d1f3d', host, forceRedirect: true });
       const { actions } = AB;
       const size = actions.Size.create(app);
 
