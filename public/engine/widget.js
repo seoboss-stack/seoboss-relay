@@ -7,35 +7,29 @@
   const host = document.getElementById('seoboss-console');
   if (!host) return console.warn('[SEOBoss] host <div id="seoboss-console"> not found');
 
-  // Ensure an inner mount
-  if (!document.getElementById('seoboss-root')) {
-    const root = document.createElement('div');
+  // Inner mount
+  let root = document.getElementById('seoboss-root');
+  if (!root) {
+    root = document.createElement('div');
     root.id = 'seoboss-root';
     host.appendChild(root);
   }
 
-  /* --- 🔧 Scroll/height fix (inject CSS overrides) ------------------------ */
-  (function injectFullscreenCss(){
+  /* ---------- Minimal CSS to avoid inner scroll/boxing ---------- */
+  (function injectCss(){
     const s = document.createElement('style');
     s.textContent = `
-      html, body, #seoboss-console, #seoboss-root {
-        height: auto !important;
-        min-height: 100vh !important;
-        overflow: visible !important;
-      }
-      /* If your engine shell/container enforces its own scroll, neutralize it */
-      #seoboss-root, #seoboss-root *[data-engine-shell],
-      #seoboss-root .engine-shell, #seoboss-root .app-shell {
-        height: auto !important;
-        min-height: 100vh !important;
-        overflow: visible !important;
+      html, body { margin:0 !important; background:transparent !important; }
+      #seoboss-console, #seoboss-root { display:block; min-height:100vh; }
+      /* If any container in the engine sets fixed heights, neutralize */
+      #seoboss-root .app-shell, #seoboss-root .engine-shell {
+        height:auto !important; min-height:100vh !important; overflow:visible !important;
       }
     `;
     document.head.appendChild(s);
   })();
-  /* ----------------------------------------------------------------------- */
 
-  // (Optional) persist hints
+  // Persist hints (optional)
   const clientId = host.getAttribute('data-client-id') || '';
   const shop     = host.getAttribute('data-shop') || '';
   try {
@@ -43,7 +37,7 @@
     localStorage.setItem('seoboss:client', JSON.stringify({ ...prev, id: clientId, shop_url: shop }));
   } catch {}
 
-  // Endpoints your engine expects (proxied via App Proxy)
+  // Engine endpoints (App Proxy)
   window.CONFIG = window.CONFIG || {};
   window.CONFIG.endpoints = window.CONFIG.endpoints || {
     hints:  "/apps/engine/hints",
@@ -52,7 +46,7 @@
     alive:  "/apps/engine/_alive"
   };
 
-  // Load your already-working Shopify-hosted assets
+  // Load engine CSS/JS (use your preferred host)
   const CSS_URL = "/apps/engine/assets/seoboss-engine.css";
   const JS_URL  = "/apps/engine/assets/seoboss-engine.js";
 
@@ -66,19 +60,34 @@
   scr.defer = true;
   document.head.appendChild(scr);
 
-  /* --- (Optional) If App Bridge UMD is present, auto-resize the iframe ---- */
-  try {
-    const ab = window.appBridge;
-    const hostParam = new URLSearchParams(location.search).get('host') || '';
-    if (ab?.createApp && hostParam) {
-      const app = ab.createApp({ apiKey: 'YOUR_PUBLIC_API_KEY', host: hostParam });
-      const { actions } = ab;
-      const size = actions.Size.create(app);
-      const sync = () => size.dispatch(actions.Size.Action.RESIZE, { height: document.documentElement.scrollHeight });
-      window.addEventListener('load', sync);
-      new ResizeObserver(sync).observe(document.body);
-    }
-  } catch {}
-  /* ----------------------------------------------------------------------- */
+  /* ---------- Robust height reporter to parent ---------- */
+  function postHeight() {
+    const h = Math.max(
+      document.documentElement.scrollHeight,
+      document.body.scrollHeight,
+      document.documentElement.offsetHeight,
+      document.body.offsetHeight
+    );
+    parent.postMessage({ type: 'SEOBOSS_IFRAME_HEIGHT', height: h }, '*');
+  }
+
+  const report = () => requestAnimationFrame(postHeight);
+
+  window.addEventListener('load', report);
+  window.addEventListener('resize', report);
+  if (document.fonts?.ready) document.fonts.ready.then(report).catch(()=>{});
+
+  // Watch layout changes (content expanding)
+  if ('ResizeObserver' in window) {
+    new ResizeObserver(report).observe(document.body);
+  }
+  if ('MutationObserver' in window) {
+    new MutationObserver(report).observe(document.body, { childList:true, subtree:true, attributes:true });
+  }
+  // Gentle heartbeat for any missed cases
+  setInterval(report, 1200);
+
+  // Let parent know we’re alive right away
+  postHeight();
 })();
 </script>
