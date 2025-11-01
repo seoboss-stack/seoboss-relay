@@ -20,6 +20,7 @@ if (AB && host) {
     console.warn('[SEOBoss] App Bridge init skipped:', e);
   }
 </script>
+  
   <style>
     /* ========== Base UI ========== */
     body{ background:#0f1421; color:#e8fff6; font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif; margin:0 }
@@ -59,25 +60,36 @@ if (AB && host) {
     @media (max-width:820px){ .row.two{ grid-template-columns:1fr } .wrap{ padding:1rem } }
   </style>
   <style>
-  /* When the Engine tab is visible, make the canvas full-bleed */
-  #tab-engine:not([hidden]) .card { background: transparent; box-shadow: none; padding: 0; }
-  #tab-engine:not([hidden]) #engineMount { margin: 0; }
-  #tab-engine:not([hidden]) iframe#engineFrame {
-    display:block;
-    width:100%;
-    height:100vh;            /* initial height: App Bridge will keep resizing */
-    min-height:100vh;
-    border:0;
-    border-radius:0;         /* lose the rounded card feel */
-    overflow:hidden;
+  /* Full-bleed look while the Engine tab is active */
+  body.seoboss-embed #seoboss-onboarding .wrap,
+  body.seoboss-embed #seoboss-onboarding .panel {
+    max-width: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
   }
-  /* Optionally let the whole page go edge-to-edge on Engine tab */
-  #tab-engine:not([hidden]) ~ .wrap,
-  #tab-engine:not([hidden]) .wrap { max-width:none; padding:0; }
-  /* If your outer .panel adds the glow frame, neutralize it on engine tab */
-  #tab-engine:not([hidden]) ~ .panel,
-  #tab-engine:not([hidden]) .panel { background: transparent; box-shadow: none; margin:0; padding:0; border-radius:0; }
+
+  body.seoboss-embed #engineMount { margin: 0 !important; }
+
+  body.seoboss-embed #engineFrame {
+    display: block !important;
+    width: 100% !important;
+    height: 100vh;
+    min-height: 100vh;
+    border: 0 !important;
+    border-radius: 0 !important;
+    overflow: hidden !important;
+  }
+
+  body.seoboss-embed #tab-engine .card {
+    background: transparent !important;
+    box-shadow: none !important;
+    padding: 0 !important;
+  }
 </style>
+
 
 </head>
 <body>
@@ -543,6 +555,8 @@ try { wireEngineTab(); } catch {}
     if (tabEn) tabEn.hidden =  isOn;
     tabOnBtn?.setAttribute('aria-selected', String(isOn));
     tabEnBtn?.setAttribute('aria-selected', String(!isOn));
+     // 🔥 When Engine tab is visible, drop chrome
+  document.body.classList.toggle('seoboss-embed', !isOn);
   }
   tabOnBtn?.addEventListener('click', ()=> selectTab('onboarding'));
   tabEnBtn?.addEventListener('click', ()=> selectTab('engine'));
