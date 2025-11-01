@@ -94,17 +94,43 @@ export const handler = async (event) => {
   const html = `<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8"/>
-  <meta name="viewport" content="width=device-width,initial-scale=1"/>
-  <title>SEOBoss Console</title>
-  <style>
-    html,body{margin:0;height:100%;background:#0f1421;color:#e8fff6;font:16px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif}
-    #seoboss-console{min-height:100vh}
-  </style>
+  ...
+  <!-- App Bridge UMD for embedded resize -->
+  <script src="https://unpkg.com/@shopify/app-bridge@3.7.10/umd/index.js"></script>
 </head>
 <body>
   <div id="seoboss-console" data-client-id="${clientId}" data-shop="${shop}"></div>
   <script async src="/apps/engine/widget.js"></script>
+
+  <script>
+  (function(){
+    try {
+      const host = new URLSearchParams(location.search).get('host') || '';
+      const AB = window.appBridge;
+      if (!AB || !AB.createApp || !host) return;
+
+      const app = AB.createApp({ apiKey: 'YOUR_PUBLIC_API_KEY', host, forceRedirect: true });
+      const { actions } = AB;
+      const size = actions.Size.create(app);
+
+      const sync = () =>
+        size.dispatch(actions.Size.Action.RESIZE, {
+          height: Math.max(
+            document.documentElement.scrollHeight,
+            document.body.scrollHeight,
+            640 // floor
+          )
+        });
+
+      window.addEventListener('load', sync);
+      new ResizeObserver(sync).observe(document.body);
+      // also catch route / DOM changes in your engine
+      document.addEventListener('SEOBOSS:content-changed', sync);
+    } catch (e) {
+      console.warn('[SEOBoss] resize skipped:', e);
+    }
+  })();
+  </script>
 </body>
 </html>`;
   return { statusCode: 200, headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" }, body: html };
