@@ -10,11 +10,14 @@
 <script>
   try {
     // window.appBridge is exposed by the UMD bundle
-    const AB = (window.appBridge && typeof window.appBridge.createApp === 'function') ? window.appBridge : null;
+const AB = (window.appBridge && typeof window.appBridge.createApp === 'function') ? window.appBridge : null;
+const host = new URLSearchParams(location.search).get('host') || '';
 if (AB && host) {
   window.__SEOBOSS__ = window.__SEOBOSS__ || {};
   window.__SEOBOSS__.app = AB.createApp({ apiKey: '...', host, forceRedirect: true });
 }
+
+
 
   } catch (e) {
     console.warn('[SEOBoss] App Bridge init skipped:', e);
@@ -65,13 +68,13 @@ if (AB && host) {
   #engineMount { margin:0; }
 
   /* The iframe should NOT have vh; we’ll set exact px via postMessage */
-  #engineFrame {
-    display:none;
-    width:100%;
-    border:0;
-    border-radius:0;
-    overflow:hidden;
-  }
+ #engineFrame {
+  display:block;      /* change from none -> block */
+  width:100%;
+  border:0;
+  border-radius:0;
+  overflow:hidden;
+}
 
   /* When Engine tab active, let the canvas go edge-to-edge */
   body.seoboss-embed #seoboss-onboarding .wrap,
@@ -717,7 +720,7 @@ try { wireEngineTab(); } catch {}
     const consoleUrl = `https://${shop}/apps/engine/console?client_id=${encodeURIComponent(id)}`;
 
     frame.src = consoleUrl;
-    frame.style.display = '';
+    frame.style.display = 'block';
     empty.style.display = 'none';
 
     if (openLn && openRow){ openLn.href = consoleUrl; openRow.style.display = 'block'; }
