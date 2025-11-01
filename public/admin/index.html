@@ -936,30 +936,7 @@ try { wireEngineTab(); } catch {}
 
 })();
 </script>
-  <script>
-(function(){
-  const frame = document.getElementById('engineFrame');
-  const clamp = (n, min, max) => Math.max(min, Math.min(max, n));
-
-  // Resize from child
-  window.addEventListener('message', (e) => {
-    const d = e?.data;
-    if (!d || d.type !== 'SEOBOSS_IFRAME_HEIGHT') return;
-    const px = clamp(Number(d.height || 0) + 24, 400, 30000); // small buffer
-    frame.style.height = px + 'px';
-  }, false);
-
-  // Toggle full-bleed chrome when Engine tab visible
-  const tabOnBtn = document.getElementById('tabOnboardingBtn');
-  const tabEnBtn = document.getElementById('tabEngineBtn');
-  const selectTab = (which) => {
-    const isOn = which === 'onboarding';
-    document.body.classList.toggle('seoboss-embed', !isOn);
-  };
-  tabOnBtn?.addEventListener('click', () => selectTab('onboarding'));
-  tabEnBtn?.addEventListener('click', () => selectTab('engine'));
-})();
-</script>
+ 
 
 </body>
 </html>
